@@ -212,8 +212,9 @@ int main(int argc, char* argv[]) {
         // Draw UI
         ui.draw(sysMonitor, procMonitor);
 
-        // Sleep briefly to avoid excessive CPU usage
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        // Sleep to reduce CPU and avoid flicker
+        // Drawing happens every 200ms, data updates every 1000ms
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
     // Cleanup
