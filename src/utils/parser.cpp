@@ -101,7 +101,7 @@ bool Parser::parseProcStat(const std::string& content,
     std::istringstream iss(content.substr(commEnd + 1));
 
     // Field indices after comm (starting at index 3 in /proc/stat)
-    int dummy_int;
+    int dummy_int __attribute__((unused));
     unsigned long dummy_ulong;
 
     iss >> state        // 3: state

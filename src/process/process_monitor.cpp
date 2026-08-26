@@ -3,6 +3,7 @@
 #include "../utils/parser.hpp"
 #include <algorithm>
 #include <sstream>
+#include <unistd.h>
 #include <sys/sysinfo.h>
 
 namespace KernelMonitor {
@@ -68,6 +69,10 @@ bool ProcessMonitor::readProcessInfo(pid_t pid, ProcessInfo& info) {
     }
 
     int parsedPid;
+    long priority = 0;
+    long nice = 0;
+    long numThreads = 0;
+
     if (!Utils::Parser::parseProcStat(*statContent,
                                       parsedPid,
                                       info.name,
@@ -75,11 +80,15 @@ bool ProcessMonitor::readProcessInfo(pid_t pid, ProcessInfo& info) {
                                       info.ppid,
                                       info.utime,
                                       info.stime,
-                                      info.priority,
-                                      info.nice,
-                                      info.numThreads)) {
+                                      priority,
+                                      nice,
+                                      numThreads)) {
         return false;
     }
+
+    info.priority = priority;
+    info.nice = nice;
+    info.numThreads = numThreads;
 
     // Read /proc/[pid]/statm for memory
     auto statmContent = Proc::ProcReader::readProcPidStatm(pid);
