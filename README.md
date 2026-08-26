@@ -6,6 +6,28 @@ A **user-space Linux systems programming application** that provides real-time m
 
 Kernel Monitor is a terminal-based application that displays live system information, process details, and allows basic process control operations. It is built entirely in user space using standard Linux interfaces.
 
+---
+
+## 🚀 Quick Installation (3 Steps)
+
+**⭐ For clear, simple installation instructions, see [INSTALL_SIMPLE.md](INSTALL_SIMPLE.md)**
+
+```bash
+# Step 1: Clone
+git clone git@github.com:Cyanexani/2520030184_053_558-OSSP.git
+cd 2520030184_053_558-OSSP
+
+# Step 2: Build (automatic dependency installation)
+./builder.sh
+
+# Step 3: Run
+./builder.sh --run
+```
+
+**That's it!** Press **Q** to quit.
+
+---
+
 ## Features
 
 ### System Monitoring
