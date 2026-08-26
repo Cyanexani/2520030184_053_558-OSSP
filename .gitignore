@@ -1,0 +1,56 @@
+# Build artifacts
+build/
+bin/
+*.o
+*.a
+*.so
+*.dylib
+
+# Executable
+kernel-monitor
+
+# Compiler outputs
+*.out
+*.exe
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Core dumps
+core
+core.*
+vgcore.*
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.kate-swp
+
+# Temporary files
+*.tmp
+*.temp
+.*.swp
+
+# CMake (if added later)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Test outputs
+tests/*.log
+tests/test_results.txt
+
+# Documentation builds
+docs/*.pdf
+docs/*.html
+
+# System files
+.directory
+Thumbs.db
