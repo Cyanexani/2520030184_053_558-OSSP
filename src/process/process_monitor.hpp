@@ -1,6 +1,7 @@
 #ifndef PROCESS_MONITOR_HPP
 #define PROCESS_MONITOR_HPP
 
+#include <chrono>
 #include <string>
 #include <vector>
 #include <map>
@@ -81,7 +82,8 @@ public:
 
 private:
     bool readProcessInfo(pid_t pid, ProcessInfo& info);
-    void calculateCpuUsage(ProcessInfo& current, const ProcessInfo& previous);
+    void calculateCpuUsage(ProcessInfo& current, const ProcessInfo& previous,
+                           double secondsElapsed);
     void detectChanges(const std::map<pid_t, ProcessInfo>& newProcesses);
 
     std::map<pid_t, ProcessInfo> processes_;
@@ -90,6 +92,11 @@ private:
     int cpuCount_;
     long clockTicks_;
     time_t bootTime_;
+
+    // When update() last sampled. CPU percentage is a rate, so it needs the
+    // real interval between the two samples being compared, not an assumed one.
+    std::chrono::steady_clock::time_point lastSample_;
+    bool haveLastSample_ = false;
 };
 
 } // namespace Process

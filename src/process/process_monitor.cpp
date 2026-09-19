@@ -38,12 +38,23 @@ void ProcessMonitor::update() {
     std::vector<pid_t> pids = Proc::ProcReader::listPids();
     std::map<pid_t, ProcessInfo> newProcesses;
 
+    // Measure the actual gap since the previous sample. The refresh interval is
+    // user-adjustable, and a missed or delayed tick stretches it further, so
+    // assuming a fixed one scales every percentage by the wrong factor.
+    auto now = std::chrono::steady_clock::now();
+    double secondsElapsed = 0.0;
+    if (haveLastSample_) {
+        secondsElapsed = std::chrono::duration<double>(now - lastSample_).count();
+    }
+    lastSample_ = now;
+    haveLastSample_ = true;
+
     for (pid_t pid : pids) {
         ProcessInfo info;
         if (readProcessInfo(pid, info)) {
             // Calculate CPU usage based on previous sample
             if (processes_.find(pid) != processes_.end()) {
-                calculateCpuUsage(info, processes_[pid]);
+                calculateCpuUsage(info, processes_[pid], secondsElapsed);
             } else {
                 info.cpuPercent = 0.0;
             }
@@ -140,23 +151,32 @@ bool ProcessMonitor::readProcessInfo(pid_t pid, ProcessInfo& info) {
     return true;
 }
 
-void ProcessMonitor::calculateCpuUsage(ProcessInfo& current, const ProcessInfo& previous) {
-    // Calculate CPU time difference
+void ProcessMonitor::calculateCpuUsage(ProcessInfo& current, const ProcessInfo& previous,
+                                       double secondsElapsed) {
+    // Jiffies this process spent on a CPU between the two samples.
     unsigned long long prevTotal = previous.utime + previous.stime;
     unsigned long long currTotal = current.utime + current.stime;
+
+    // A PID can be recycled onto a different process, whose counters start
+    // lower. Unsigned subtraction would wrap that into an enormous figure.
+    if (currTotal < prevTotal) {
+        current.cpuPercent = 0.0;
+        return;
+    }
     unsigned long long timeDiff = currTotal - prevTotal;
 
-    // We need time elapsed between samples
-    // For simplicity, assume 1 second between updates
-    // In a real implementation, track actual time
-    double timeElapsed = 1.0;  // seconds
-
-    // CPU percentage = (time_diff / clock_ticks) / time_elapsed * 100
-    if (timeElapsed > 0 && clockTicks_ > 0) {
-        current.cpuPercent = (100.0 * timeDiff) / (clockTicks_ * timeElapsed);
+    // Percentage of one CPU = (jiffies / ticks_per_second) / seconds * 100.
+    // secondsElapsed is the measured interval; guard the first sample, where
+    // there is no previous timestamp to subtract, and a zero clock rate.
+    if (secondsElapsed > 0.0 && clockTicks_ > 0) {
+        current.cpuPercent = (100.0 * timeDiff) / (clockTicks_ * secondsElapsed);
     } else {
         current.cpuPercent = 0.0;
     }
+
+    // Left deliberately unclamped: a multi-threaded process can exceed 100%,
+    // which is the same convention top(1) uses. Anything above 100% for a
+    // single-threaded process means this arithmetic is wrong.
 }
 
 void ProcessMonitor::detectChanges(const std::map<pid_t, ProcessInfo>& newProcesses) {
