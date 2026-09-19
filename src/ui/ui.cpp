@@ -212,7 +212,7 @@ void UserInterface::drawProcessList(const Process::ProcessMonitor& procMonitor) 
 
     // Header
     wattron(contentWin_, A_BOLD);
-    mvwprintw(contentWin_, 1, 2, "%-7s %-20s %6s %6s %8s %5s",
+    mvwprintw(contentWin_, 1, 2, "%-7s %-20s %6s %6s %12s %5s",
               "PID", "PROCESS", "CPU%", "MEM%", "STATE", "THR");
     wattroff(contentWin_, A_BOLD);
 
@@ -243,12 +243,16 @@ void UserInterface::drawProcessList(const Process::ProcessMonitor& procMonitor) 
 
         double memPercent = Process::ProcessMonitor::calculateMemoryPercent(proc);
 
-        mvwprintw(contentWin_, row, 2, "%-7d %-20s %5.1f%% %5.1f%% %8s %5ld",
+        // 12 columns, not 8: "Disk Sleep" and "Tracing Stop" do not fit in 8 and
+        // were being cut to "Disk ..." and "Traci...". D is the state you look for
+        // when a process is wedged on uninterruptible I/O, so mangling it defeats
+        // the point of the column.
+        mvwprintw(contentWin_, row, 2, "%-7d %-20s %5.1f%% %5.1f%% %12s %5ld",
                   proc.pid,
                   truncate(proc.name, 20).c_str(),
                   proc.cpuPercent,
                   memPercent,
-                  truncate(Process::ProcessMonitor::getStateString(proc.state), 8).c_str(),
+                  truncate(Process::ProcessMonitor::getStateString(proc.state), 12).c_str(),
                   proc.numThreads);
 
         if (procIndex == selectedIndex_) {
