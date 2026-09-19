@@ -351,13 +351,13 @@ void UserInterface::drawProcessTree(const Process::ProcessMonitor& procMonitor) 
     for (size_t i = 0; i < tree.roots.size(); ++i) {
         if (row >= maxRow) break;
         drawTreeRecursive(tree, tree.roots[i], 0, row, maxRow,
-                          i + 1 == tree.roots.size());
+                          i + 1 == tree.roots.size(), "");
     }
 }
 
 void UserInterface::drawTreeRecursive(const Process::ProcessTree& tree,
                                      pid_t pid, int depth, int& row, int maxRow,
-                                     bool isLast) {
+                                     bool isLast, const std::string& prefix) {
     if (row >= maxRow) return;
 
     auto it = tree.processes.find(pid);
@@ -365,17 +365,18 @@ void UserInterface::drawTreeRecursive(const Process::ProcessTree& tree,
 
     const auto& proc = it->second;
 
-    // Draw indentation. The corner form marks the final child of a parent, so
-    // you can see where one subtree ends and the next begins. Requires the
-    // wide-character ncurses build; the 8-bit one paints a broken cell per byte.
-    std::string indent(depth * 3, ' ');
+    // prefix carries the ancestry: one vertical bar for every ancestor that
+    // still has siblings below it, blanks for the ones that do not. Without it
+    // a deep child floats free and you cannot trace which branch it hangs off.
+    // The tee and corner forms then mark whether this node ends its own level.
+    std::string indent = prefix;
     if (depth > 0) {
         indent += isLast ? "└─ " : "├─ ";
     }
 
     // indent holds multibyte glyphs, so length() overstates the columns used.
-    // Budget the name off the visible depth instead, and never go negative.
-    int used = depth * 3 + (depth > 0 ? 3 : 0);
+    // Every level contributes exactly three columns, so derive it from depth.
+    int used = depth * 3;
     int nameRoom = termWidth_ - 12 - used;
     if (nameRoom < 8) {
         nameRoom = 8;
@@ -385,13 +386,18 @@ void UserInterface::drawTreeRecursive(const Process::ProcessTree& tree,
               indent.c_str(), proc.pid,
               truncate(proc.name, static_cast<size_t>(nameRoom)).c_str());
 
-    // Draw children
+    // Draw children. A child's prefix extends ours: a bar if this node still
+    // has siblings coming, blanks if it was the last one.
     auto childIt = tree.children.find(pid);
     if (childIt != tree.children.end()) {
         const auto& kids = childIt->second;
+        std::string childPrefix = prefix;
+        if (depth > 0) {
+            childPrefix += isLast ? "   " : "│  ";
+        }
         for (size_t i = 0; i < kids.size(); ++i) {
             drawTreeRecursive(tree, kids[i], depth + 1, row, maxRow,
-                              i + 1 == kids.size());
+                              i + 1 == kids.size(), childPrefix);
         }
     }
 }

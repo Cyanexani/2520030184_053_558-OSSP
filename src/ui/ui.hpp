@@ -69,7 +69,8 @@ private:
 
     // Helper functions
     void drawTreeRecursive(const Process::ProcessTree& tree, pid_t pid,
-                          int depth, int& row, int maxRow, bool isLast);
+                          int depth, int& row, int maxRow, bool isLast,
+                          const std::string& prefix);
     std::string formatPercent(double percent);
     std::string truncate(const std::string& str, size_t width);
     void clearArea(int startRow, int endRow);
