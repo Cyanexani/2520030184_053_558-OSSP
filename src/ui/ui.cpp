@@ -451,7 +451,7 @@ void UserInterface::drawHelpBar() {
     switch (viewMode_) {
         case ViewMode::PROCESS_LIST:
             helpText = "[↑↓] Select  [ENTER] Details  [T] Tree  [E] Events  "
-                      "[K] Kill  [S] Stop  [C] Continue  [R] Refresh  "
+                      "[K] Term  [X] Kill  [S] Stop  [C] Cont  [R] Refresh  "
                       "[+/-] Rate  [Q] Quit";
             break;
         case ViewMode::PROCESS_DETAIL:

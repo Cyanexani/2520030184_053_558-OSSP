@@ -187,6 +187,36 @@ int main(int argc, char* argv[]) {
                     break;
                 }
 
+                case 'x':
+                case 'X': {
+                    // SIGKILL. Separate key from K deliberately: this one cannot
+                    // be caught, blocked or ignored, so the process gets no
+                    // chance to clean up. The confirmation names the signal.
+                    if (ui.getViewMode() == UI::ViewMode::PROCESS_LIST) {
+                        pid_t selectedPid = ui.getSelectedPid();
+                        if (selectedPid > 0) {
+                            auto procInfo = procMonitor.getProcessInfo(selectedPid);
+                            if (procInfo) {
+                                std::string confirmMsg = "Send SIGKILL to PID " +
+                                    std::to_string(selectedPid) + " (" +
+                                    procInfo->name + ")? Cannot be caught.";
+
+                                if (ui.confirmAction(confirmMsg)) {
+                                    auto result = processControl.killProcess(selectedPid);
+                                    ui.setStatusMessage(
+                                        "PID " + std::to_string(selectedPid) + ": " +
+                                        result.errorMessage,
+                                        !result.success
+                                    );
+                                } else {
+                                    ui.setStatusMessage("Cancelled");
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+
                 case 's':
                 case 'S': {
                     // Stop process (SIGSTOP)
