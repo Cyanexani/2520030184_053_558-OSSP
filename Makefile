@@ -18,7 +18,7 @@ BIN_DIR = bin
 TARGET = $(BIN_DIR)/kernel-monitor
 
 # Standalone teaching programs; see demo/README.md
-DEMO_TARGETS = $(BIN_DIR)/zombie $(BIN_DIR)/orphan
+DEMO_TARGETS = $(BIN_DIR)/zombie $(BIN_DIR)/orphan $(BIN_DIR)/busy
 
 # Source files
 SOURCES = $(SRC_DIR)/main.cpp \

@@ -73,3 +73,35 @@ landed in the tree.
 
 Either way nothing leaks: the new parent reaps the orphan when it exits, so an
 orphan never becomes a permanent zombie.
+
+## busy: a process that stays Running
+
+`zombie` and `orphan` both sit at 0% CPU, so neither demonstrates the Running
+state or a live CPU reading. `busy` does.
+
+```bash
+./bin/busy            # runs until you stop it, 2 prints per second
+./bin/busy 30         # stops itself after 30 seconds
+./bin/busy 0 10       # runs until stopped, 10 prints per second
+```
+
+It prints its own PID on the first line, so there is no guesswork about which
+row to watch. In Kernel Monitor its STATE reads `Running` and its CPU% sits near
+100% of one core.
+
+The throttling is deliberate. A loop that calls `printf()` as fast as it can
+spends most of its life blocked on `write()`, so the kernel reports it as `S`,
+sleeping on I/O, and the demonstration shows the opposite of what it means to.
+`busy` burns a fixed slice of real CPU between prints instead.
+
+### Using it to show the difference between SIGTERM and SIGKILL
+
+`busy` installs a `sigaction` handler for `SIGINT` and `SIGTERM`, so:
+
+- Press `K` in Kernel Monitor, or Ctrl+C. It catches the signal and exits with a
+  summary line, because a catchable signal lets a process clean up first.
+- Press `X` instead. `SIGKILL` cannot be caught, blocked or ignored, so the
+  process disappears with no summary at all.
+
+Running it once each way, and pointing at the missing summary line, is the
+clearest demonstration of why those two signals are not interchangeable.
