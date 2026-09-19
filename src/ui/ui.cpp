@@ -7,6 +7,12 @@
 namespace KernelMonitor {
 namespace UI {
 
+namespace {
+// How long getInput() waits for a key before reporting ERR. Bounds how long a
+// resize or a data tick can sit unpainted, without spinning the CPU.
+constexpr int kInputTimeoutMs = 120;
+}
+
 UserInterface::UserInterface()
     : mainWin_(nullptr), systemWin_(nullptr), contentWin_(nullptr),
       statusWin_(nullptr), helpWin_(nullptr),
@@ -29,7 +35,7 @@ bool UserInterface::initialize() {
     cbreak();              // Disable line buffering
     noecho();              // Don't echo input
     keypad(stdscr, TRUE);  // Enable special keys
-    nodelay(stdscr, TRUE); // Non-blocking input
+    timeout(kInputTimeoutMs); // Block for at most one tick, wake at once on a key
     curs_set(0);           // Hide cursor
 
     // Enable colors if available
@@ -83,10 +89,12 @@ void UserInterface::draw(const System::SystemMonitor& sysMonitor,
         contentWin_ = newwin(termHeight_ - 7, termWidth_, 4, 0);
         statusWin_ = newwin(1, termWidth_, termHeight_ - 3, 0);
         helpWin_ = newwin(2, termWidth_, termHeight_ - 2, 0);
-    }
 
-    // Clear screen
-    clear();
+        // Geometry moved, so the physical screen holds text at coordinates no
+        // window owns any more. This is the one case that needs a full wipe.
+        clear();
+        wnoutrefresh(stdscr);
+    }
 
     // Draw components
     drawSystemInfo(sysMonitor);
@@ -109,12 +117,18 @@ void UserInterface::draw(const System::SystemMonitor& sysMonitor,
     drawStatusBar();
     drawHelpBar();
 
-    // Refresh all windows
-    wrefresh(systemWin_);
-    wrefresh(contentWin_);
-    wrefresh(statusWin_);
-    wrefresh(helpWin_);
-    refresh();
+    // Stage all four windows, then push a single update. ncurses diffs its
+    // virtual screen against the physical one and rewrites only the cells that
+    // changed, so a tick repaints the numbers that moved and leaves the labels,
+    // borders and unchanged rows untouched. Two things would defeat that: a
+    // clear() above (it sets clearok, forcing a full repaint) and a refresh()
+    // on stdscr here, which would paint stdscr's blank contents back over the
+    // windows we just drew. Neither belongs in this path.
+    wnoutrefresh(systemWin_);
+    wnoutrefresh(contentWin_);
+    wnoutrefresh(statusWin_);
+    wnoutrefresh(helpWin_);
+    doupdate();
 }
 
 void UserInterface::drawSystemInfo(const System::SystemMonitor& sysMonitor) {
@@ -158,16 +172,42 @@ void UserInterface::drawProcessList(const Process::ProcessMonitor& procMonitor) 
     // Get process list
     auto processes = procMonitor.getProcessList();
 
-    // Sort by CPU usage (descending)
+    // Remember which process the highlight is on before the list is rebuilt.
+    pid_t previouslySelected = getSelectedPid();
+
+    // Sort by CPU usage (descending), breaking ties by PID. The tie-break is
+    // what keeps the table still: std::sort is not stable and getProcessList()
+    // returns processes in /proc readdir order, so without it the dozens of
+    // rows sitting at 0.0% swap places on every tick. Rows that hold position
+    // let ncurses rewrite just the few numbers that moved.
     std::sort(processes.begin(), processes.end(),
               [](const Process::ProcessInfo& a, const Process::ProcessInfo& b) {
-                  return a.cpuPercent > b.cpuPercent;
+                  if (a.cpuPercent != b.cpuPercent) {
+                      return a.cpuPercent > b.cpuPercent;
+                  }
+                  return a.pid < b.pid;
               });
 
     // Store PIDs for selection
     displayedPids_.clear();
     for (const auto& proc : processes) {
         displayedPids_.push_back(proc.pid);
+    }
+
+    // Follow the selected process to its new row rather than keeping the row
+    // index, so K/S/C always signal the process that is highlighted. A busy
+    // process climbing the list would otherwise slide out from under the
+    // highlight between the keypress and the confirmation.
+    if (previouslySelected > 0) {
+        auto it = std::find(displayedPids_.begin(), displayedPids_.end(),
+                            previouslySelected);
+        if (it != displayedPids_.end()) {
+            selectedIndex_ = static_cast<size_t>(
+                std::distance(displayedPids_.begin(), it));
+        }
+    }
+    if (!displayedPids_.empty() && selectedIndex_ >= displayedPids_.size()) {
+        selectedIndex_ = displayedPids_.size() - 1;
     }
 
     // Header
@@ -308,14 +348,16 @@ void UserInterface::drawProcessTree(const Process::ProcessMonitor& procMonitor) 
     int row = 2;
     int maxRow = termHeight_ - 10;
 
-    for (pid_t rootPid : tree.roots) {
+    for (size_t i = 0; i < tree.roots.size(); ++i) {
         if (row >= maxRow) break;
-        drawTreeRecursive(tree, rootPid, 0, row, maxRow);
+        drawTreeRecursive(tree, tree.roots[i], 0, row, maxRow,
+                          i + 1 == tree.roots.size());
     }
 }
 
 void UserInterface::drawTreeRecursive(const Process::ProcessTree& tree,
-                                     pid_t pid, int depth, int& row, int maxRow) {
+                                     pid_t pid, int depth, int& row, int maxRow,
+                                     bool isLast) {
     if (row >= maxRow) return;
 
     auto it = tree.processes.find(pid);
@@ -323,20 +365,33 @@ void UserInterface::drawTreeRecursive(const Process::ProcessTree& tree,
 
     const auto& proc = it->second;
 
-    // Draw indentation
-    std::string indent(depth * 2, ' ');
+    // Draw indentation. The corner form marks the final child of a parent, so
+    // you can see where one subtree ends and the next begins. Requires the
+    // wide-character ncurses build; the 8-bit one paints a broken cell per byte.
+    std::string indent(depth * 3, ' ');
     if (depth > 0) {
-        indent += "└─ ";
+        indent += isLast ? "└─ " : "├─ ";
+    }
+
+    // indent holds multibyte glyphs, so length() overstates the columns used.
+    // Budget the name off the visible depth instead, and never go negative.
+    int used = depth * 3 + (depth > 0 ? 3 : 0);
+    int nameRoom = termWidth_ - 12 - used;
+    if (nameRoom < 8) {
+        nameRoom = 8;
     }
 
     mvwprintw(contentWin_, row++, 2, "%s%d %s",
-              indent.c_str(), proc.pid, truncate(proc.name, 30 - indent.length()).c_str());
+              indent.c_str(), proc.pid,
+              truncate(proc.name, static_cast<size_t>(nameRoom)).c_str());
 
     // Draw children
     auto childIt = tree.children.find(pid);
     if (childIt != tree.children.end()) {
-        for (pid_t childPid : childIt->second) {
-            drawTreeRecursive(tree, childPid, depth + 1, row, maxRow);
+        const auto& kids = childIt->second;
+        for (size_t i = 0; i < kids.size(); ++i) {
+            drawTreeRecursive(tree, kids[i], depth + 1, row, maxRow,
+                              i + 1 == kids.size());
         }
     }
 }
@@ -396,7 +451,8 @@ void UserInterface::drawHelpBar() {
     switch (viewMode_) {
         case ViewMode::PROCESS_LIST:
             helpText = "[↑↓] Select  [ENTER] Details  [T] Tree  [E] Events  "
-                      "[K] Kill  [S] Stop  [C] Continue  [R] Refresh  [Q] Quit";
+                      "[K] Kill  [S] Stop  [C] Continue  [R] Refresh  "
+                      "[+/-] Rate  [Q] Quit";
             break;
         case ViewMode::PROCESS_DETAIL:
             helpText = "[ESC/B] Back  [Q] Quit";
@@ -499,15 +555,18 @@ bool UserInterface::confirmAction(const std::string& message) {
     wrefresh(confirmWin);
 
     // Wait for input (blocking)
-    nodelay(stdscr, FALSE);
+    timeout(-1);
     int ch = getch();
-    nodelay(stdscr, TRUE);
+    timeout(kInputTimeoutMs);
 
     delwin(confirmWin);
 
-    // Redraw screen
-    touchwin(stdscr);
-    refresh();
+    // The dialog overwrote cells the four windows still believe they own, so
+    // mark them dirty. The next draw() repaints over where it was.
+    if (systemWin_) touchwin(systemWin_);
+    if (contentWin_) touchwin(contentWin_);
+    if (statusWin_) touchwin(statusWin_);
+    if (helpWin_) touchwin(helpWin_);
 
     return (ch == 'y' || ch == 'Y');
 }

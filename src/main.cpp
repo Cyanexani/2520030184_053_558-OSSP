@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <clocale>
 #include <iostream>
 #include <chrono>
 #include <thread>
@@ -30,6 +32,13 @@ void setupSignalHandlers() {
 }
 
 int main(int argc, char* argv[]) {
+    (void)argc;
+    (void)argv;
+
+    // Must run before initscr(): it tells ncurses which encoding the terminal
+    // uses, so multibyte characters occupy one cell instead of one per byte.
+    setlocale(LC_ALL, "");
+
     // Setup signal handlers for clean exit
     setupSignalHandlers();
 
@@ -51,9 +60,17 @@ int main(int argc, char* argv[]) {
 
     ui.setStatusMessage("Kernel Monitor started. Press Q to quit.");
 
-    // Refresh interval (in milliseconds)
-    const int refreshInterval = 1000;
+    // How often the /proc data is re-read, adjustable at runtime with +/-.
+    // Two seconds reads comfortably; a second still looks live.
+    int refreshInterval = 2000;
+    const int minInterval = 500;
+    const int maxInterval = 10000;
     auto lastUpdate = std::chrono::steady_clock::now();
+
+    // Repaint only when the screen would actually differ: a data tick, a key
+    // that changed something, or a resize. Redrawing on a fixed timer instead
+    // rewrites identical text over itself and reads as flicker.
+    bool needsRedraw = true;
 
     // Main loop
     while (g_running) {
@@ -74,7 +91,28 @@ int main(int argc, char* argv[]) {
                     // Force refresh
                     sysMonitor.update();
                     procMonitor.update();
+                    lastUpdate = std::chrono::steady_clock::now();
                     ui.setStatusMessage("Refreshed");
+                    break;
+
+                case '+':
+                case '=':
+                    // Slower updates: easier to read
+                    refreshInterval = std::min(refreshInterval + 500, maxInterval);
+                    ui.setStatusMessage("Update interval: " +
+                        std::to_string(refreshInterval) + " ms");
+                    break;
+
+                case '-':
+                case '_':
+                    // Faster updates
+                    refreshInterval = std::max(refreshInterval - 500, minInterval);
+                    ui.setStatusMessage("Update interval: " +
+                        std::to_string(refreshInterval) + " ms");
+                    break;
+
+                case KEY_RESIZE:
+                    // draw() re-creates its windows at the new size.
                     break;
 
                 case KEY_UP:
@@ -196,6 +234,10 @@ int main(int argc, char* argv[]) {
                     handled = false;
                     break;
             }
+
+            if (handled) {
+                needsRedraw = true;
+            }
         }
 
         // Periodic refresh
@@ -207,13 +249,17 @@ int main(int argc, char* argv[]) {
             sysMonitor.update();
             procMonitor.update();
             lastUpdate = now;
+            needsRedraw = true;
         }
 
         // Draw UI
-        ui.draw(sysMonitor, procMonitor);
+        if (needsRedraw) {
+            ui.draw(sysMonitor, procMonitor);
+            needsRedraw = false;
+        }
 
-        // Sleep to reduce CPU but stay responsive
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // No sleep here: getInput() blocks for up to one input tick, which
+        // paces the loop without adding lag to a keypress.
     }
 
     // Cleanup
