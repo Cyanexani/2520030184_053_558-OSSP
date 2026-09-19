@@ -1,275 +1,248 @@
 # Kernel Monitor
 
-A **user-space Linux systems programming application** that provides real-time monitoring of Linux system and process states using Linux/POSIX APIs and the `/proc` filesystem.
+A user-space Linux systems programming application that monitors system and process
+state in real time through the `/proc` filesystem and POSIX APIs. No kernel module,
+no driver, no root.
 
----
+## Quick start
 
-## ⚡ Quick Start
-
-### One Command Installation
+One command, which downloads, installs dependencies, builds and runs:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Cyanexani/2520030184_053_558-OSSP/main/install.sh | bash
 ```
 
-### Then Run
+Then, from the install directory:
 
 ```bash
-./builder.sh --run
+./bin/kernel-monitor
 ```
 
-**Press Q to quit.**
+Press `Q` to quit.
 
----
-
-## 📚 Documentation
-
-| Guide | Purpose |
-|-------|---------|
-| **HOW_TO_RUN.md** | ⭐ How to run after installing |
-| **INSTALL_SIMPLE.md** | Installation (3 easy steps) |
-| **ONE_COMMAND.md** | One-command installation |
-| **BUILDER.md** | Builder script reference |
-| **QUICKSTART.md** | Quick keyboard reference |
-| **WSL2_NO_GIT.md** | WSL2 without git |
-
----
-
-## ✨ Features
-
-### System Monitoring
-- Real-time CPU usage (aggregate and per-core)
-- Memory and swap usage
-- Load averages, uptime, kernel version
-
-### Process Monitoring
-- Live process list with sorting
-- Detailed process inspection
-- Process tree visualization
-- Event tracking (process creation/termination)
-- File descriptor counting
-
-### Process Control
-- Send signals: SIGTERM, SIGKILL, SIGSTOP, SIGCONT
-- Safety confirmations for destructive operations
-- Permission and error handling
-
-### User Interface
-- Terminal-based with ncurses
-- Multiple views: list, details, tree, events
-- Color-coded display
-- Keyboard navigation
-
----
-
-## 🎮 Keyboard Controls
+## Keyboard controls
 
 | Key | Action |
 |-----|--------|
-| **Q** | Quit |
-| **↑/↓** | Navigate |
-| **Enter** | Process details |
-| **T** | Process tree |
-| **E** | Events log |
-| **K** | Kill process (SIGTERM) |
-| **S** | Stop process (SIGSTOP) |
-| **C** | Continue process (SIGCONT) |
-| **R** | Refresh |
+| `Q` | Quit |
+| `↑` `↓` | Move the selection |
+| `Page Up` `Page Down` | Move the selection ten rows |
+| `Enter` | Open process details |
+| `T` | Process tree view |
+| `E` | Event log view |
+| `B` or `Esc` | Back to the process list |
+| `R` | Refresh immediately |
+| `+` `-` | Change the update interval, 500 ms to 10 s |
+| `K` | Terminate the selected process, `SIGTERM` |
+| `X` | Kill the selected process, `SIGKILL` |
+| `S` | Suspend the selected process, `SIGSTOP` |
+| `C` | Resume the selected process, `SIGCONT` |
 
----
+`K`, `X` and `S` ask for confirmation first. The selection follows the process it is
+on, not the row number, so a process climbing the CPU list cannot slide out from
+under the highlight between the keypress and the confirmation.
 
-## 🔧 Requirements
+## Features
 
-- **OS**: Linux (any distribution)
-- **Kernel**: 3.x or later
-- **Dependencies**: build-essential, libncurses-dev
-- **Compiler**: g++ with C++17 support
+**System monitoring.** CPU usage, memory and swap, load averages, uptime, kernel
+version and CPU count.
 
-All dependencies are installed automatically by the builder script.
+**Process monitoring.** Live process list sorted by CPU with PID tie-breaking, a
+detail view per process, a process tree rebuilt from every process's PPID, and an
+event log of process creation and termination retaining the last 100 entries.
 
----
+**Process control.** `SIGTERM`, `SIGKILL`, `SIGSTOP` and `SIGCONT` through `kill()`,
+with confirmation prompts and permission error reporting.
 
-## 🛠️ Build Commands
+**Interface.** ncurses, four views, colour-coded, keyboard driven. Redraws only the
+cells that changed rather than repainting the screen each tick.
+
+## Requirements
+
+- Linux, any distribution. Also runs under WSL2, with the caveat noted below.
+- `build-essential` and `libncurses-dev`
+- `g++` with C++17 support
+
+The UI links against the **wide-character** ncurses library, `-lncursesw`, and calls
+`setlocale()` before `initscr()`. Both are required: the interface draws multibyte
+glyphs for the arrow keys and the tree branches, and the 8-bit library renders one
+broken cell per byte instead. On Debian and Ubuntu `libncurses-dev` provides it; on
+Fedora and RHEL install `ncurses-devel`.
+
+The installer checks for it and fails with a readable message rather than a linker
+error if it is missing.
+
+## Building
 
 ```bash
-# Build
-make
-
-# Clean
-make clean
-
-# Debug build
-make debug
-
-# Install system-wide
+make            # builds the monitor and both demo programs
+make demo       # builds only the demo programs
+make clean      # removes build artefacts
+make debug      # unoptimised build with symbols
+make run        # build, then run
 sudo make install
 ```
 
----
+## Demo programs
 
-## 📋 How It Works
+Two small POSIX programs that create a zombie and an orphan on purpose, so both
+conditions can be observed in `ps` and in the monitor's own `STATE` column.
 
-**Kernel Monitor uses Linux/POSIX APIs to:**
+```bash
+./bin/zombie 30     # holds a zombie for 30 seconds, then reaps it
+./bin/orphan 25     # parent exits after 3 seconds, child reports its new PPID
+```
 
-1. Read system statistics from `/proc` filesystem
-2. Calculate CPU usage, memory usage, load averages
-3. List and inspect processes
-4. Send signals for process control
-5. Display real-time updates in terminal UI
+While the zombie is held:
 
-**Key Files Used:**
-- `/proc/stat` - CPU statistics
-- `/proc/meminfo` - Memory information
-- `/proc/uptime` - System uptime
-- `/proc/[pid]/stat` - Process statistics
-- `/proc/[pid]/fd/` - File descriptors
+```bash
+ps -eo pid,ppid,stat,comm | grep -w Z
+```
 
----
+`STAT` shows `Z` and `ps -ef` renders the command as `<defunct>`.
 
-## 🎯 Linux/POSIX APIs
+A zombie is dead with a live parent that has not called `wait()`. An orphan is alive
+with a dead parent. The zombie is the defect, because those PIDs are never released;
+the orphan is handled by the kernel automatically.
 
-- `kill()` - Send signals
-- `sysconf()` - System configuration
-- `sysinfo()` - System information
-- `opendir()`, `readdir()`, `closedir()` - Directory operations
-- `sigaction()` - Signal handling
-- File I/O via C++ streams
+See `demo/README.md` for the full walkthrough, including why an orphan under WSL is
+re-parented to a subreaper rather than to PID 1.
 
----
+## How it works
 
-## 📊 Project Structure
+Each refresh cycle reads `/proc`, parses the fields, computes rates, updates the
+process list and tree, detects creation and exit events, and redraws the changed
+cells. The default interval is 2 seconds, adjustable at runtime.
+
+Files read:
+
+| Path | Purpose |
+|------|---------|
+| `/proc/stat` | Aggregate CPU jiffy counters |
+| `/proc/meminfo` | Memory and swap totals |
+| `/proc/uptime` | System uptime |
+| `/proc/loadavg` | Load averages |
+| `/proc/cpuinfo` | CPU model and core enumeration |
+| `/proc/version` | Kernel version string |
+| `/proc/[pid]/stat` | Per-process state, CPU time, threads, priority |
+| `/proc/[pid]/statm` | Per-process memory |
+| `/proc/[pid]/status` | Per-process detail including PPID |
+| `/proc/[pid]/fd/` | Open file descriptor count |
+
+CPU percentage is a rate, computed as the difference between two timed samples of a
+process's `utime` plus `stime`, divided by the **measured** interval between them
+rather than an assumed one. A single-threaded process therefore reads at most 100%,
+and the reading does not change when the update interval does.
+
+## Linux and POSIX APIs used
+
+| API | Purpose |
+|-----|---------|
+| `open()` `read()` `close()` | Read `/proc` files |
+| `opendir()` `readdir()` `closedir()` | Enumerate numeric `/proc` entries as PIDs |
+| `kill()` | Deliver a signal to a target PID |
+| `sigaction()` | Install the monitor's own `SIGINT` and `SIGTERM` handler |
+| `sysconf()` | Clock ticks per second and page size |
+| `sysinfo()` | Uptime and total memory |
+| `fork()` `wait()` `waitpid()` `getppid()` | Used by the demo programs |
+
+The monitor handles signals as well as sending them. Its handler writes a
+`volatile sig_atomic_t` flag and returns immediately, because a handler can interrupt
+at any machine instruction and the flag must be written atomically and never cached
+in a register.
+
+## Project structure
 
 ```
 src/
-├── main.cpp              # Application entry point
-├── ui/                   # Terminal UI (ncurses)
-├── proc/                 # /proc filesystem reader
-├── process/              # Process monitoring
-├── system/               # System statistics
-├── signals/              # Signal operations
-└── utils/                # Parsing utilities
+├── main.cpp            # entry point, signal handlers, the refresh loop
+├── proc/               # raw /proc access
+├── parser (utils/)     # turns /proc text into values
+├── system/             # machine-wide CPU, memory, load
+├── process/            # per-process model, tree, events
+├── signals/            # the only module that calls kill()
+└── ui/                 # ncurses rendering and input
 
-tests/                     # Test suite
-docs/                      # Technical documentation
-builder.sh                 # Automated installer
-install.sh                 # One-command installer
-Makefile                   # Build system
+demo/                   # zombie and orphan demonstration programs
+tests/                  # automated checks and documented test cases
+docs/                   # technical documentation and presentation notes
 ```
 
----
+## Measured performance
 
-## 🚀 Installation Methods
+Taken from the running binary under four busy-loop processes, inside WSL2 on a
+12-CPU machine.
 
-### Method 1: One Command (Easiest)
-```bash
-curl -fsSL https://raw.githubusercontent.com/Cyanexani/2520030184_053_558-OSSP/main/install.sh | bash
-```
+| Metric | Value |
+|--------|-------|
+| Own CPU usage | 0.40%, sampled over 10 s |
+| Resident memory | 5.1 MB, 7.4 MB virtual |
+| `/proc` scan, mean | 3.25 ms across 43 processes |
+| `/proc` scan, worst of 20 runs | 11.4 ms |
+| Threads / open descriptors | 1 / 3 |
+| Binary size | 180 KB |
 
-### Method 2: With Git
-```bash
-git clone https://github.com/Cyanexani/2520030184_053_558-OSSP.git
-cd 2520030184_053_558-OSSP
-./builder.sh
-```
+That scan cost divides to roughly **0.076 ms per process**, which extrapolates to
+about 15 ms at 200 processes and 38 ms at 500. Those two figures are arithmetic, not
+measurements: this environment runs 43 to 49 processes, so behaviour on a larger
+machine has not been observed.
 
-### Method 3: Without Git (ZIP)
-1. Download ZIP: https://github.com/Cyanexani/2520030184_053_558-OSSP/archive/main.zip
-2. Extract ZIP
-3. Run: `./builder.sh`
-
-### Method 4: WSL2 Without Git
-See **WSL2_NO_GIT.md**
-
----
-
-## 🧪 Testing
+## Testing
 
 ```bash
-# Run automated tests
 cd tests
 ./run_tests.sh
 ```
 
-Tests verify:
-- System monitoring accuracy
-- Process detection
-- Process control operations
-- UI functionality
-- Stability under load
+Ten automated checks covering `/proc` availability, the ncurses library, the
+compiler, the build, the produced executable, per-process files, signal operations,
+statistics formats and the terminal environment. `tests/TEST_CASES.md` documents a
+further eight categories of manual test cases.
 
----
+## Running under WSL2
 
-## 📈 Performance
+The project builds and runs normally under WSL2, but `/proc` there belongs to the
+**WSL virtual machine**, not to Windows. The monitor shows Linux processes inside
+WSL and cannot see Windows processes at all. A fresh WSL instance runs only around
+40 to 50 processes, so start some workloads first if you want a populated list.
 
-- **CPU Usage**: 0.5-2% (typical)
-- **Memory**: 3-5 MB RSS
-- **Refresh Rate**: 1 second
-- **Scalability**: Handles 500+ processes
+Orphan re-parenting also differs: WSL's `Relay` process registers as a child
+subreaper, so an orphan is re-parented to it rather than to PID 1. See
+`demo/README.md`.
 
----
+## Educational scope
 
-## 🎓 Educational Value
+The project exercises the first three course outcomes of Operating Systems and
+Systems Programming (25CS2104E):
 
-Demonstrates:
-- Process management and lifecycle
-- CPU scheduling and time accounting
-- Memory management from user space
-- Signal mechanisms and IPC
-- File descriptors and I/O
-- `/proc` filesystem architecture
-- Systems programming best practices
+- **CO-1**, the OS as a service layer: user space versus kernel space, system calls,
+  and `/proc` as a kernel filesystem surfaced through the VFS.
+- **CO-2**, processes and process control: the process abstraction, PID and PPID
+  relationships, lifecycle and state transitions, user-level scheduling accounting,
+  and both common pitfalls via the demo programs.
+- **CO-3**, IPC and signals: asynchronous notification with `kill()`, POSIX signal
+  handlers, and job control through `SIGSTOP` and `SIGCONT`.
 
----
+Memory figures are reported as data the tool reads. Memory management as a subject
+is CO-4 and is not claimed here.
 
-## ✅ What's Inside
+## Other documentation
 
-- **2,500+ lines** of C++ code
-- **7 modular components**
-- **15+ Linux/POSIX APIs**
-- **40+ test scenarios**
-- **Complete documentation**
-- **Automated build system**
-- **One-command installer**
+| Guide | Purpose |
+|-------|---------|
+| `HOW_TO_RUN.md` | Running it after installing |
+| `INSTALL_SIMPLE.md` | Installation in three steps |
+| `ONE_COMMAND.md` | The one-command installer |
+| `BUILDER.md` | `builder.sh` reference |
+| `QUICKSTART.md` | Keyboard reference |
+| `WSL2_NO_GIT.md` | WSL2 without git |
+| `demo/README.md` | Zombie and orphan walkthrough |
+| `docs/PROJECT_DOCUMENTATION.md` | Technical documentation |
 
----
-
-## 🔗 Repository
+## Repository
 
 https://github.com/Cyanexani/2520030184_053_558-OSSP
 
----
+## License
 
-## 📞 Need Help?
-
-1. **How to run?** → See **HOW_TO_RUN.md**
-2. **How to install?** → See **INSTALL_SIMPLE.md**
-3. **Quick reference?** → See **QUICKSTART.md**
-4. **WSL2 issues?** → See **WSL2_NO_GIT.md**
-5. **Builder questions?** → See **BUILDER.md**
-
----
-
-## 🎉 Quick Example
-
-```bash
-# Install
-curl -fsSL https://raw.githubusercontent.com/Cyanexani/2520030184_053_558-OSSP/main/install.sh | bash
-
-# Run
-./builder.sh --run
-
-# Use
-# Navigate with arrow keys
-# Press K to kill a process
-# Press Q to quit
-```
-
----
-
-## 📄 License
-
-Educational project for Operating Systems and Systems Programming course.
-
----
-
-**Ready to monitor your Linux system!** 🚀
+Educational project for the Operating Systems and Systems Programming course.
