@@ -72,9 +72,12 @@ run: all
 # by name from any directory without remembering the build path.
 install: all
 	@echo "Installing kernel-monitor to /usr/local/bin..."
-	sudo cp $(TARGET) /usr/local/bin/
+	@# install(1) writes to a temporary name and renames over the target, so a
+	@# copy that is currently executing does not cause "Text file busy". A plain
+	@# cp fails whenever the monitor is already running somewhere.
+	sudo install -m 755 $(TARGET) /usr/local/bin/kernel-monitor
 	sudo ln -sf /usr/local/bin/kernel-monitor /usr/local/bin/kernelmoni
-	sudo cp $(BIN_DIR)/zombie $(BIN_DIR)/orphan $(BIN_DIR)/busy /usr/local/bin/ 2>/dev/null || true
+	sudo install -m 755 $(BIN_DIR)/zombie $(BIN_DIR)/orphan $(BIN_DIR)/busy /usr/local/bin/
 	@echo "Installed. Run with:  kernelmoni   (or kernel-monitor)"
 
 # Uninstall
