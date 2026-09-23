@@ -146,7 +146,7 @@ chmod +x builder.sh
 sudo apt-get install build-essential libncurses-dev
 
 # Fedora:
-sudo dnf install gcc-c++ ncurses-devel
+sudo dnf install gcc ncurses-devel
 
 # Arch:
 sudo pacman -S base-devel ncurses

@@ -31,7 +31,7 @@ sudo apt-get install build-essential libncurses-dev
 
 **Fedora/RHEL/CentOS:**
 ```bash
-sudo dnf install gcc-c++ ncurses-devel
+sudo dnf install gcc ncurses-devel
 ```
 
 **Arch Linux:**

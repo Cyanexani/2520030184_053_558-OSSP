@@ -337,7 +337,7 @@ close(fd);
 
 ### Directory Operations
 
-```c++
+```c
 DIR* dir = opendir("/proc");
 struct dirent* entry;
 while ((entry = readdir(dir)) != NULL) {
@@ -350,7 +350,7 @@ closedir(dir);
 
 ### Signal Operations
 
-```c++
+```c
 #include <signal.h>
 
 int result = kill(pid, SIGTERM);
@@ -363,7 +363,7 @@ if (result == -1) {
 
 ### System Configuration
 
-```c++
+```c
 #include <unistd.h>
 
 long cpuCount = sysconf(_SC_NPROCESSORS_ONLN);
@@ -375,7 +375,7 @@ long clockTicks = sysconf(_SC_CLK_TCK);
 
 ### System Information
 
-```c++
+```c
 #include <sys/sysinfo.h>
 
 struct sysinfo si;
@@ -389,7 +389,7 @@ if (sysinfo(&si) == 0) {
 
 ### Symbolic Links
 
-```c++
+```c
 #include <unistd.h>
 
 char buffer[4096];
@@ -404,7 +404,7 @@ if (len != -1) {
 
 ### Signal Handler Setup
 
-```c++
+```c
 #include <signal.h>
 
 void signalHandler(int signal) {

@@ -159,7 +159,7 @@ cd 2520030184_053_558-OSSP
 ```bash
 # Install dependencies manually
 sudo apt-get install build-essential libncurses-dev
-# Or for Fedora: sudo dnf install gcc-c++ ncurses-devel
+# Or for Fedora: sudo dnf install gcc ncurses-devel
 # Or for Arch: sudo pacman -S base-devel ncurses
 
 # Get the code

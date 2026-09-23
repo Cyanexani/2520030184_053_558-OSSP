@@ -178,7 +178,7 @@ From `/proc/[pid]/fd/`:
 - Error handling (EPERM, ESRCH)
 
 **Code Example:**
-```c++
+```c
 int result = kill(pid, SIGTERM);
 if (result == -1) {
     if (errno == EPERM) // Permission denied
