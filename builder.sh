@@ -82,12 +82,12 @@ install_dependencies() {
             ;;
         fedora)
             print_step "Installing for Fedora..."
-            sudo dnf install -y gcc-c++ ncurses-devel git
+            sudo dnf install -y gcc ncurses-devel git
             print_success "Fedora dependencies installed"
             ;;
         rhel|centos)
             print_step "Installing for RHEL/CentOS..."
-            sudo yum install -y gcc-c++ ncurses-devel git
+            sudo yum install -y gcc ncurses-devel git
             print_success "RHEL/CentOS dependencies installed"
             ;;
         arch|manjaro)
@@ -103,7 +103,7 @@ install_dependencies() {
         *)
             print_warning "Unknown distro: $DISTRO"
             print_info "Please install manually:"
-            echo "  - build-essential / gcc-c++"
+            echo "  - build-essential (Debian) or gcc (Fedora)"
             echo "  - libncurses-dev / ncurses-devel"
             echo "  - git"
             ;;
@@ -116,12 +116,12 @@ verify_dependencies() {
 
     local all_good=true
 
-    # Check g++
-    if command_exists g++; then
-        GCC_VERSION=$(g++ --version | head -n1)
-        print_success "C++ Compiler: $GCC_VERSION"
+    # Check gcc
+    if command_exists gcc; then
+        GCC_VERSION=$(gcc --version | head -n1)
+        print_success "C Compiler: $GCC_VERSION"
     else
-        print_error "g++ not found"
+        print_error "gcc not found"
         all_good=false
     fi
 

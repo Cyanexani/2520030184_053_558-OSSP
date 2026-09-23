@@ -1,13 +1,14 @@
 # Compiler
-CXX = g++
 CC = gcc
 # gnu11, not c11: -std=c11 sets __STRICT_ANSI__, which hides the POSIX
-# declarations (fork, getppid, pid_t) these demo programs are built to show.
+# declarations (fork, getppid, pid_t) this project is built on.
 CFLAGS = -std=gnu11 -Wall -Wextra -O2
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -pthread -D_XOPEN_SOURCE_EXTENDED
+# The monitor additionally needs the GNU/POSIX extensions (sysinfo, DT_DIR,
+# clock_gettime) and the wide-character ncurses API.
+MON_CFLAGS = $(CFLAGS) -D_GNU_SOURCE -D_XOPEN_SOURCE_EXTENDED
 # ncursesw, not ncurses: the UI prints multibyte characters (the arrow keys in
 # the help bar), which the 8-bit library renders one broken cell per byte.
-LDFLAGS = -lncursesw -pthread
+LDFLAGS = -lncursesw
 
 # Directories
 SRC_DIR = src
@@ -21,16 +22,16 @@ TARGET = $(BIN_DIR)/kernel-monitor
 DEMO_TARGETS = $(BIN_DIR)/zombie $(BIN_DIR)/orphan $(BIN_DIR)/busy
 
 # Source files
-SOURCES = $(SRC_DIR)/main.cpp \
-          $(SRC_DIR)/utils/parser.cpp \
-          $(SRC_DIR)/proc/proc_reader.cpp \
-          $(SRC_DIR)/system/system_monitor.cpp \
-          $(SRC_DIR)/process/process_monitor.cpp \
-          $(SRC_DIR)/signals/process_control.cpp \
-          $(SRC_DIR)/ui/ui.cpp
+SOURCES = $(SRC_DIR)/main.c \
+          $(SRC_DIR)/utils/parser.c \
+          $(SRC_DIR)/proc/proc_reader.c \
+          $(SRC_DIR)/system/system_monitor.c \
+          $(SRC_DIR)/process/process_monitor.c \
+          $(SRC_DIR)/signals/process_control.c \
+          $(SRC_DIR)/ui/ui.c
 
 # Object files
-OBJECTS = $(SOURCES:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
+OBJECTS = $(SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
 # Default target
 all: directories $(TARGET) demo
@@ -42,13 +43,13 @@ directories:
 
 # Link the executable
 $(TARGET): $(OBJECTS)
-	$(CXX) $(OBJECTS) -o $(TARGET) $(LDFLAGS)
+	$(CC) $(OBJECTS) -o $(TARGET) $(LDFLAGS)
 	@echo "Build complete: $(TARGET)"
 
 # Compile source files
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CC) $(MON_CFLAGS) -c $< -o $@
 
 # Demo programs. Plain C, no ncurses, each a single translation unit.
 demo: directories $(DEMO_TARGETS)
@@ -67,19 +68,24 @@ run: all
 	$(TARGET)
 
 # Install (copy to /usr/local/bin - requires sudo)
+# kernelmoni is a short alias for the same binary, so the tool can be launched
+# by name from any directory without remembering the build path.
 install: all
 	@echo "Installing kernel-monitor to /usr/local/bin..."
 	sudo cp $(TARGET) /usr/local/bin/
-	@echo "Installation complete"
+	sudo ln -sf /usr/local/bin/kernel-monitor /usr/local/bin/kernelmoni
+	sudo cp $(BIN_DIR)/zombie $(BIN_DIR)/orphan $(BIN_DIR)/busy /usr/local/bin/ 2>/dev/null || true
+	@echo "Installed. Run with:  kernelmoni   (or kernel-monitor)"
 
 # Uninstall
 uninstall:
 	@echo "Removing kernel-monitor from /usr/local/bin..."
-	sudo rm -f /usr/local/bin/kernel-monitor
+	sudo rm -f /usr/local/bin/kernel-monitor /usr/local/bin/kernelmoni
+	sudo rm -f /usr/local/bin/zombie /usr/local/bin/orphan /usr/local/bin/busy
 	@echo "Uninstallation complete"
 
 # Debug build
-debug: CXXFLAGS += -g -DDEBUG -O0
+debug: MON_CFLAGS += -g -DDEBUG -O0
 debug: clean all
 
 # Help
@@ -90,7 +96,7 @@ help:
 	@echo "  make clean    - Remove build artifacts"
 	@echo "  make run      - Build and run the application"
 	@echo "  make debug    - Build with debug symbols"
-	@echo "  make install  - Install to /usr/local/bin (requires sudo)"
+	@echo "  make install  - Install as 'kernelmoni' in /usr/local/bin (needs sudo)"
 	@echo "  make uninstall- Remove from /usr/local/bin (requires sudo)"
 	@echo "  make help     - Show this help message"
 

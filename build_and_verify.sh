@@ -25,13 +25,13 @@ fi
 
 echo -e "${BLUE}Step 1: Checking dependencies...${NC}"
 
-# Check for g++
-if ! command -v g++ &> /dev/null; then
-    echo -e "${RED}✗ g++ not found${NC}"
+# Check for gcc
+if ! command -v gcc &> /dev/null; then
+    echo -e "${RED}✗ gcc not found${NC}"
     echo "Install with: sudo apt-get install build-essential"
     exit 1
 else
-    echo -e "${GREEN}✓ g++ found${NC}"
+    echo -e "${GREEN}✓ gcc found${NC}"
 fi
 
 # Check for ncurses

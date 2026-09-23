@@ -263,7 +263,7 @@ When you press **K** to terminate a process:
 ```
 kernel-monitor/
 ├── src/
-│   ├── main.cpp              # Application entry point
+│   ├── main.c                # Application entry point
 │   ├── ui/                   # User interface (ncurses)
 │   ├── proc/                 # /proc filesystem reader
 │   ├── process/              # Process monitoring

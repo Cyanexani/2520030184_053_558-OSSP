@@ -93,7 +93,7 @@ Identifies your Linux distribution (Ubuntu, Fedora, Arch, etc.)
 
 ### Step 2: Install Dependencies
 Installs required packages:
-- `build-essential` / `gcc-c++` - C++ compiler
+- `build-essential` / `gcc` - C compiler
 - `libncurses-dev` / `ncurses-devel` - Terminal UI library
 - `git` - Version control
 
@@ -173,7 +173,7 @@ This is normal and required.
 ✓ Ubuntu/Debian dependencies installed
 
 ▶ Verifying dependencies...
-✓ C++ Compiler: g++ (Ubuntu 11.4.0-1ubuntu1~22.04.1)
+✓ C Compiler: gcc (Ubuntu 11.4.0-1ubuntu1~22.04.1)
 ✓ Build tool: GNU Make 4.3
 ✓ ncurses library found
 ✓ /proc filesystem accessible

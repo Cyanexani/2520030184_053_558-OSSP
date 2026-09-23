@@ -52,12 +52,12 @@ fi
 echo ""
 
 # Test 3: Check compiler
-echo "Test 3: C++ compiler"
-if command -v g++ &> /dev/null; then
-    GCC_VERSION=$(g++ --version | head -n1)
-    pass "g++ is available: $GCC_VERSION"
+echo "Test 3: C compiler"
+if command -v gcc &> /dev/null; then
+    GCC_VERSION=$(gcc --version | head -n1)
+    pass "gcc is available: $GCC_VERSION"
 else
-    fail "g++ compiler not found"
+    fail "gcc compiler not found"
 fi
 echo ""
 

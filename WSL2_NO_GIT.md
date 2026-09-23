@@ -340,9 +340,8 @@ df -h
 
 ### Check Build Tools
 ```bash
-g++ --version
-make --version
 gcc --version
+make --version
 ```
 
 If any are missing:

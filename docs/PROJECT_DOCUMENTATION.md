@@ -172,7 +172,7 @@ System administrators, developers, and students need to understand how their Lin
 - `sysconf()` - Get system configuration
 - `sysinfo()` - Get system statistics
 - `readlink()` - Read symbolic link value
-- `open()`, `read()`, `close()` - File I/O (via C++ streams)
+- `open()`, `read()`, `close()` - File I/O (called directly)
 - `opendir()`, `readdir()`, `closedir()` - Directory operations
 
 **Demonstrated in Project**:
@@ -321,11 +321,16 @@ System administrators, developers, and students need to understand how their Lin
 
 ### File Operations
 
-```c++
-// C++ ifstream (uses open/read/close internally)
-std::ifstream file("/proc/stat");
-std::stringstream buffer;
-buffer << file.rdbuf();
+```c
+/* A /proc file reports a size of zero, so it is read until it stops
+   producing bytes rather than sized up front. */
+int fd = open("/proc/stat", O_RDONLY | O_CLOEXEC);
+while (total < bufsz - 1) {
+    ssize_t n = read(fd, buf + total, bufsz - 1 - total);
+    if (n <= 0) break;
+    total += (size_t)n;
+}
+close(fd);
 ```
 
 **System calls**: `open()`, `read()`, `close()`
@@ -335,7 +340,7 @@ buffer << file.rdbuf();
 ```c++
 DIR* dir = opendir("/proc");
 struct dirent* entry;
-while ((entry = readdir(dir)) != nullptr) {
+while ((entry = readdir(dir)) != NULL) {
     // Process directory entries
 }
 closedir(dir);
@@ -376,7 +381,7 @@ long clockTicks = sysconf(_SC_CLK_TCK);
 struct sysinfo si;
 if (sysinfo(&si) == 0) {
     unsigned long totalRam = si.totalram * si.mem_unit;
-    time_t bootTime = time(nullptr) - si.uptime;
+    time_t bootTime = time(NULL) - si.uptime;
 }
 ```
 
@@ -410,7 +415,7 @@ struct sigaction sa;
 sa.sa_handler = signalHandler;
 sigemptyset(&sa.sa_mask);
 sa.sa_flags = 0;
-sigaction(SIGINT, &sa, nullptr);
+sigaction(SIGINT, &sa, NULL);
 ```
 
 **System call**: `sigaction()`
@@ -541,23 +546,30 @@ Solution:
    - Handle: Cleanup resources, exit
 
 **Error Handling Example**:
-```cpp
-std::optional<ProcessInfo> readProcessInfo(pid_t pid) {
-    auto statContent = ProcReader::readProcPidStat(pid);
-    if (!statContent) {
-        // Process disappeared or permission denied
-        return std::nullopt;  // Not an error, just skip
+```c
+static bool read_process_info(km_process_monitor *m, pid_t pid,
+                              km_process_info *info) {
+    char buf[KM_PROC_PID_BUF_SIZE];
+
+    /* Every field starts defined, so a /proc file that cannot be read
+       leaves a zero rather than whatever was on the stack. */
+    memset(info, 0, sizeof(*info));
+    info->pid = pid;
+
+    if (km_proc_read_pid_stat(pid, buf, sizeof(buf)) < 0) {
+        return false;  /* Process disappeared, or permission denied. */
     }
 
-    if (!Parser::parseProcStat(*statContent, ...)) {
-        // Parse failed - unexpected format
-        // Log warning but don't crash
-        return std::nullopt;
+    if (!km_parse_proc_stat(buf, ...)) {
+        return false;  /* Unexpected format: skip it, do not crash. */
     }
 
-    return processInfo;
+    return true;
 }
 ```
+
+A caller distinguishes "no such process" from an error by the `false` return;
+the optional-shaped lookups elsewhere return `NULL` for the same reason.
 
 ---
 
@@ -641,8 +653,8 @@ std::optional<ProcessInfo> readProcessInfo(pid_t pid) {
 ### Optimization Techniques
 
 1. **Efficient File Reading**:
-   - Use C++ streams with rdbuf() for bulk read
-   - Avoid line-by-line reading when possible
+   - Read each /proc file into one buffer in a single pass
+   - Parse from that buffer instead of re-reading line by line
 
 2. **Selective Updates**:
    - Only update visible processes in detail view

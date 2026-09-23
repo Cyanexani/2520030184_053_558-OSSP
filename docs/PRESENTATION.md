@@ -197,7 +197,7 @@ if (result == -1) {
 - `readlink()` - Read symbolic links
 
 **File Operations:**
-- `open()`, `read()`, `close()` (via C++ streams)
+- `open()`, `read()`, `close()` (called directly)
 - `opendir()`, `readdir()`, `closedir()`
 
 **Signal Handling:**

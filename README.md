@@ -61,7 +61,7 @@ cells that changed rather than repainting the screen each tick.
 
 - Linux, any distribution. Also runs under WSL2, with the caveat noted below.
 - `build-essential` and `libncurses-dev`
-- `g++` with C++17 support
+- `gcc` with C11 support (the build uses `-std=gnu11`)
 
 The UI links against the **wide-character** ncurses library, `-lncursesw`, and calls
 `setlocale()` before `initscr()`. Both are required: the interface draws multibyte
@@ -155,7 +155,7 @@ in a register.
 
 ```
 src/
-├── main.cpp            # entry point, signal handlers, the refresh loop
+├── main.c              # entry point, signal handlers, the refresh loop
 ├── proc/               # raw /proc access
 ├── parser (utils/)     # turns /proc text into values
 ├── system/             # machine-wide CPU, memory, load

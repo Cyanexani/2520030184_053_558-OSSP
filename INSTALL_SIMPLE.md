@@ -252,8 +252,8 @@ cat BUILDER.md         # Builder script help
 # Check if you have git
 git --version
 
-# Check if you have g++
-g++ --version
+# Check if you have gcc
+gcc --version
 
 # Check if you have make
 make --version
