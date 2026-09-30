@@ -51,6 +51,15 @@ version and CPU count.
 detail view per process, a process tree rebuilt from every process's PPID, and an
 event log of process creation and termination retaining the last 100 entries.
 
+**Detail view.** Besides CPU, memory, threads, priority and descriptors, each process
+shows its process group, session, controlling terminal and whether its group is the
+terminal's foreground job, plus its minor and major page fault counts with live
+rates per second.
+
+**Two threads.** A collector thread reads `/proc` while the main thread handles the
+keyboard and drawing, so a slow scan never delays a keypress. The header shows how
+long the last scan took.
+
 **Process control.** `SIGTERM`, `SIGKILL`, `SIGSTOP` and `SIGCONT` through `kill()`,
 with confirmation prompts and permission error reporting.
 
@@ -75,7 +84,7 @@ error if it is missing.
 ## Building
 
 ```bash
-make            # builds the monitor and both demo programs
+make            # builds the monitor and all nine demo programs
 make demo       # builds only the demo programs
 make clean      # removes build artefacts
 make debug      # unoptimised build with symbols
@@ -85,34 +94,43 @@ sudo make install
 
 ## Demo programs
 
-Two small POSIX programs that create a zombie and an orphan on purpose, so both
-conditions can be observed in `ps` and in the monitor's own `STATE` column.
+Nine small C programs in `demo/`, each a single file that narrates what it does.
+Most are meant to be run next to the monitor, so the effect shows up in its views.
+
+| Program | Course outcome | What it shows |
+|---------|----------------|---------------|
+| `zombie` | CO-2 | A child that has exited but was never reaped |
+| `orphan` | CO-2 | A child whose parent exits first, and who adopts it |
+| `busy` | CO-2 | A CPU-bound process, to watch state and CPU% |
+| `pipeline` | CO-1, CO-3 | What a shell does for `a \| b`: `pipe`, `fork`, `dup2`, `execvp`, one process group |
+| `fifo` | CO-3 | A named pipe between two processes, in one or two terminals |
+| `jobctl` | CO-3 | Process groups, sessions, `SIGSTOP` and `SIGCONT` to a whole job, `setsid()` |
+| `vmem` | CO-4 | Address space layout, demand paging, page tables, copy-on-write, `SIGSEGV`, planted bugs for Valgrind and ASan |
+| `fileio` | CO-5 | VFS, ext4, inodes and links, descriptors and `dup`, buffered versus unbuffered, `mmap` of a file |
+| `threadsync` | CO-6 | Threads versus processes, a race, mutex, atomics, condition variables, a semaphore, deadlock, read-write lock, barrier |
 
 ```bash
-./bin/zombie 30     # holds a zombie for 30 seconds, then reaps it
-./bin/orphan 25     # parent exits after 3 seconds, child reports its new PPID
+./bin/zombie 30       # holds a zombie for 30 seconds, then reaps it
+./bin/jobctl 6        # six seconds per phase, time to watch it in the monitor
+./bin/vmem            # the memory tour; sudo ./bin/vmem also shows frame numbers
+./bin/vmem leak       # run under valgrind or an ASan build to catch the leak
 ```
 
-While the zombie is held:
-
-```bash
-ps -eo pid,ppid,stat,comm | grep -w Z
-```
-
-`STAT` shows `Z` and `ps -ef` renders the command as `<defunct>`.
-
-A zombie is dead with a live parent that has not called `wait()`. An orphan is alive
-with a dead parent. The zombie is the defect, because those PIDs are never released;
-the orphan is handled by the kernel automatically.
-
-See `demo/README.md` for the full walkthrough, including why an orphan under WSL is
-re-parented to a subreaper rather than to PID 1.
+See `demo/README.md` for each program's walkthrough and the output to expect.
 
 ## How it works
 
 Each refresh cycle reads `/proc`, parses the fields, computes rates, updates the
 process list and tree, detects creation and exit events, and redraws the changed
 cells. The default interval is 2 seconds, adjustable at runtime.
+
+The work is split across two threads. The collector thread sleeps on a condition
+variable until the interval runs out, or until `R` or `+` `-` wakes it early. It
+builds the next sample **without** holding the lock, then takes the mutex only for
+the moment it takes to swap the new sample in. The main thread takes the same mutex
+only to draw. Signal delivery is steered to the main thread by blocking every signal
+in the collector before it starts. There is a single lock, so no lock ordering
+deadlock is possible, and no thread ever holds it while waiting for a key.
 
 Files read:
 
@@ -124,7 +142,7 @@ Files read:
 | `/proc/loadavg` | Load averages |
 | `/proc/cpuinfo` | CPU model and core enumeration |
 | `/proc/version` | Kernel version string |
-| `/proc/[pid]/stat` | Per-process state, CPU time, threads, priority |
+| `/proc/[pid]/stat` | Per-process state, CPU time, threads, priority, process group, session, terminal, page faults |
 | `/proc/[pid]/statm` | Per-process memory |
 | `/proc/[pid]/status` | Per-process detail including PPID |
 | `/proc/[pid]/fd/` | Open file descriptor count |
@@ -132,7 +150,8 @@ Files read:
 CPU percentage is a rate, computed as the difference between two timed samples of a
 process's `utime` plus `stime`, divided by the **measured** interval between them
 rather than an assumed one. A single-threaded process therefore reads at most 100%,
-and the reading does not change when the update interval does.
+and the reading does not change when the update interval does. Page fault rates are
+computed the same way from the `minflt` and `majflt` counters.
 
 ## Linux and POSIX APIs used
 
@@ -144,7 +163,23 @@ and the reading does not change when the update interval does.
 | `sigaction()` | Install the monitor's own `SIGINT` and `SIGTERM` handler |
 | `sysconf()` | Clock ticks per second and page size |
 | `sysinfo()` | Uptime and total memory |
-| `fork()` `wait()` `waitpid()` `getppid()` | Used by the demo programs |
+| `pthread_create()` `pthread_join()` | Start and stop the collector thread |
+| `pthread_mutex_*` `pthread_cond_timedwait()` | Guard the shared sample, and sleep until the interval ends or a key wakes the collector |
+| `pthread_condattr_setclock()` | Time the wait on `CLOCK_MONOTONIC`, immune to clock changes |
+| `pthread_sigmask()` | Keep `SIGINT`, `SIGTERM` and `SIGWINCH` on the main thread |
+
+The demo programs add these:
+
+| API | Demo |
+|-----|------|
+| `fork()` `execvp()` `waitpid()` `getppid()` | zombie, orphan, pipeline, jobctl |
+| `pipe()` `dup2()` | pipeline |
+| `mkfifo()` | fifo |
+| `setpgid()` `getpgrp()` `setsid()` `getsid()` `tcgetpgrp()` | pipeline, jobctl |
+| `mmap()` `munmap()` `mprotect()` `madvise()` `msync()` | vmem, fileio |
+| `getrusage()` `sigsetjmp()` `siglongjmp()` | vmem |
+| `statfs()` `stat()` `lstat()` `link()` `symlink()` `unlink()` `dup()` `lseek()` `pread()` | fileio |
+| `pthread_*` `sem_*` `stdatomic.h` | threadsync |
 
 The monitor handles signals as well as sending them. Its handler writes a
 `volatile sig_atomic_t` flag and returns immediately, because a handler can interrupt
@@ -161,9 +196,10 @@ src/
 ├── system/             # machine-wide CPU, memory, load
 ├── process/            # per-process model, tree, events
 ├── signals/            # the only module that calls kill()
+├── collector/          # the background thread that samples /proc
 └── ui/                 # ncurses rendering and input
 
-demo/                   # zombie and orphan demonstration programs
+demo/                   # nine demonstration programs, one per concept
 tests/                  # automated checks and documented test cases
 docs/                   # technical documentation and presentation notes
 ```
@@ -175,17 +211,22 @@ Taken from the running binary under four busy-loop processes, inside WSL2 on a
 
 | Metric | Value |
 |--------|-------|
-| Own CPU usage | 0.40%, sampled over 10 s |
-| Resident memory | 5.1 MB, 7.4 MB virtual |
-| `/proc` scan, mean | 3.25 ms across 43 processes |
-| `/proc` scan, worst of 20 runs | 11.4 ms |
-| Threads / open descriptors | 1 / 3 |
-| Binary size | 180 KB |
+| Own CPU usage | 0.30%, sampled over 10 s |
+| Resident memory | 3.6 MB, 77.5 MB virtual |
+| `/proc` scan, mean | 2.82 ms across 37 processes |
+| `/proc` scan, worst of 20 runs | 3.9 ms |
+| Threads, open descriptors | 2 threads, 3 descriptors |
+| Binary size | 60 KB |
 
 That scan cost divides to roughly **0.076 ms per process**, which extrapolates to
 about 15 ms at 200 processes and 38 ms at 500. Those two figures are arithmetic, not
-measurements: this environment runs 43 to 49 processes, so behaviour on a larger
+measurements: this environment runs 37 to 49 processes, so behaviour on a larger
 machine has not been observed.
+
+The virtual size is large only because of the second thread. glibc reserves a 64 MB
+malloc arena and an 8 MB stack for it, but reserving address space costs nothing
+until a page is touched, which is why the resident figure stays at 3.6 MB. That is
+demand paging, the same effect `./bin/vmem` demonstrates.
 
 ## Testing
 
@@ -212,19 +253,28 @@ subreaper, so an orphan is re-parented to it rather than to PID 1. See
 
 ## Educational scope
 
-The project exercises the first three course outcomes of Operating Systems and
-Systems Programming (25CS2104E):
+The project covers all six course outcomes of Operating Systems and Systems
+Programming (25CS2104E). The source marks each place a concept is applied with a
+`[CO-n]` comment.
 
 - **CO-1**, the OS as a service layer: user space versus kernel space, system calls,
-  and `/proc` as a kernel filesystem surfaced through the VFS.
+  `/proc` as a kernel filesystem surfaced through the VFS, and the command execution
+  journey a shell follows (`pipeline`).
 - **CO-2**, processes and process control: the process abstraction, PID and PPID
   relationships, lifecycle and state transitions, user-level scheduling accounting,
-  and both common pitfalls via the demo programs.
-- **CO-3**, IPC and signals: asynchronous notification with `kill()`, POSIX signal
-  handlers, and job control through `SIGSTOP` and `SIGCONT`.
-
-Memory figures are reported as data the tool reads. Memory management as a subject
-is CO-4 and is not claimed here.
+  and the zombie and orphan pitfalls (`zombie`, `orphan`, `busy`).
+- **CO-3**, IPC, signals and job control: signals sent with `kill()` and handled with
+  `sigaction()`, anonymous pipes (`pipeline`), named pipes (`fifo`), and process
+  groups, sessions and job control, both in the detail view and in `jobctl`.
+- **CO-4**, memory management: page fault counts and rates in the detail view, and
+  the address space layout, demand paging, page tables, dynamic allocation,
+  copy-on-write, `SIGSEGV` and memory debugging tools in `vmem`.
+- **CO-5**, file systems and file I/O: the VFS, ext4, inodes and directory entries,
+  descriptors and open file descriptions, buffered versus unbuffered I/O and
+  memory-mapped files, all in `fileio`.
+- **CO-6**, concurrency: the monitor's own collector thread, mutex and condition
+  variable, plus races, atomics, semaphores, deadlock, read-write locks and
+  barriers in `threadsync`.
 
 ## Other documentation
 
@@ -236,7 +286,7 @@ is CO-4 and is not claimed here.
 | `BUILDER.md` | `builder.sh` reference |
 | `QUICKSTART.md` | Keyboard reference |
 | `WSL2_NO_GIT.md` | WSL2 without git |
-| `demo/README.md` | Zombie and orphan walkthrough |
+| `demo/README.md` | Walkthrough of all nine demo programs |
 | `docs/PROJECT_DOCUMENTATION.md` | Technical documentation |
 
 ## Repository
