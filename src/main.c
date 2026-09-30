@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "collector/collector.h"
 #include "process/process_monitor.h"
 #include "signals/process_control.h"
 #include "system/system_monitor.h"
@@ -44,11 +45,13 @@ static void setup_signal_handlers(void) {
 /* Prompt and signal the highlighted process, reporting the outcome on the
    status bar. Shared by the SIGTERM, SIGKILL and SIGSTOP keys, which differ
    only in wording and in which call they make. */
-static void signal_selected(km_ui *ui, const km_process_monitor *monitor,
+static void signal_selected(km_ui *ui, km_collector *collector,
+                            const km_process_monitor *monitor,
                             km_signal_result (*action)(pid_t),
                             const char *signal_name, const char *caveat) {
     pid_t selected_pid;
     const km_process_info *info;
+    char name[KM_COMM_MAX];
     char confirm_msg[256];
     char status[320];
     km_signal_result result;
@@ -62,13 +65,24 @@ static void signal_selected(km_ui *ui, const km_process_monitor *monitor,
         return;
     }
 
+    /* [CO-6] Copy what the prompt needs and let go of the lock before
+       asking. km_ui_confirm() waits on the user for as long as they take, and
+       holding the lock across it would freeze the collector for that whole
+       time. The pointer from find() is also only valid while the lock is
+       held, since the next publish swaps the array it points into. */
+    km_collector_lock(collector);
     info = km_process_monitor_find(monitor, selected_pid);
+    if (info) {
+        snprintf(name, sizeof(name), "%s", info->name);
+    }
+    km_collector_unlock(collector);
+
     if (!info) {
         return;
     }
 
     snprintf(confirm_msg, sizeof(confirm_msg), "Send %s to PID %d (%s)?%s",
-             signal_name, (int)selected_pid, info->name, caveat);
+             signal_name, (int)selected_pid, name, caveat);
 
     if (!km_ui_confirm(ui, confirm_msg)) {
         km_ui_set_status(ui, "Cancelled", false);
@@ -84,6 +98,7 @@ static void signal_selected(km_ui *ui, const km_process_monitor *monitor,
 int main(int argc, char *argv[]) {
     km_system_monitor sys_monitor;
     km_process_monitor proc_monitor;
+    km_collector collector;
     km_ui ui;
 
     /* How often the /proc data is re-read, adjustable at runtime with +/-.
@@ -91,7 +106,7 @@ int main(int argc, char *argv[]) {
     int refresh_interval = 2000;
     const int min_interval = 500;
     const int max_interval = 10000;
-    struct timespec last_update;
+    unsigned long drawn_generation = 0;
 
     /* Repaint only when the screen would actually differ: a data tick, a key
        that changed something, or a resize. Redrawing on a fixed timer instead
@@ -136,16 +151,25 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* One sample before the second thread exists, so the first frame has
+       data. Nothing else can touch the monitors yet, so no lock is needed. */
     km_system_monitor_update(&sys_monitor);
     km_process_monitor_update(&proc_monitor);
 
+    if (!km_collector_start(&collector, &sys_monitor, &proc_monitor, refresh_interval)) {
+        km_ui_cleanup(&ui);
+        fprintf(stderr, "Failed to start the collector thread\n");
+        km_system_monitor_destroy(&sys_monitor);
+        km_process_monitor_destroy(&proc_monitor);
+        return 1;
+    }
+
     km_ui_set_status(&ui, "Kernel Monitor started. Press Q to quit.", false);
 
-    km_clock_now(&last_update);
-
     while (g_running) {
+        /* Waiting for a key happens unlocked, so the collector is free to
+           publish while the user is idle. */
         int ch = km_ui_get_input();
-        struct timespec now;
 
         if (ch != ERR) {
             bool handled = true;
@@ -159,9 +183,9 @@ int main(int argc, char *argv[]) {
 
                 case 'r':
                 case 'R':
-                    km_system_monitor_update(&sys_monitor);
-                    km_process_monitor_update(&proc_monitor);
-                    km_clock_now(&last_update);
+                    /* The collector does the sweep; the new sample is drawn
+                       as soon as it is published. */
+                    km_collector_request_refresh(&collector);
                     km_ui_set_status(&ui, "Refreshed", false);
                     break;
 
@@ -172,6 +196,7 @@ int main(int argc, char *argv[]) {
                     if (refresh_interval > max_interval) {
                         refresh_interval = max_interval;
                     }
+                    km_collector_set_interval(&collector, refresh_interval);
                     snprintf(status, sizeof(status), "Update interval: %d ms",
                              refresh_interval);
                     km_ui_set_status(&ui, status, false);
@@ -184,6 +209,7 @@ int main(int argc, char *argv[]) {
                     if (refresh_interval < min_interval) {
                         refresh_interval = min_interval;
                     }
+                    km_collector_set_interval(&collector, refresh_interval);
                     snprintf(status, sizeof(status), "Update interval: %d ms",
                              refresh_interval);
                     km_ui_set_status(&ui, status, false);
@@ -235,7 +261,7 @@ int main(int argc, char *argv[]) {
 
                 case 'k':
                 case 'K':
-                    signal_selected(&ui, &proc_monitor, km_terminate_process,
+                    signal_selected(&ui, &collector, &proc_monitor, km_terminate_process,
                                     "SIGTERM", "");
                     break;
 
@@ -244,13 +270,13 @@ int main(int argc, char *argv[]) {
                     /* SIGKILL. Separate key from K deliberately: this one cannot
                        be caught, blocked or ignored, so the process gets no
                        chance to clean up. The confirmation names the signal. */
-                    signal_selected(&ui, &proc_monitor, km_kill_process,
+                    signal_selected(&ui, &collector, &proc_monitor, km_kill_process,
                                     "SIGKILL", " Cannot be caught.");
                     break;
 
                 case 's':
                 case 'S':
-                    signal_selected(&ui, &proc_monitor, km_stop_process,
+                    signal_selected(&ui, &collector, &proc_monitor, km_stop_process,
                                     "SIGSTOP", "");
                     break;
 
@@ -282,24 +308,25 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        /* Periodic refresh. */
-        km_clock_now(&now);
-        if (km_clock_diff_ms(&last_update, &now) >= refresh_interval) {
-            km_system_monitor_update(&sys_monitor);
-            km_process_monitor_update(&proc_monitor);
-            last_update = now;
+        /* [CO-6] Read the shared sample only with the lock held. A new
+           generation means the collector published since the last frame. */
+        km_collector_lock(&collector);
+        if (collector.generation != drawn_generation) {
+            drawn_generation = collector.generation;
             needs_redraw = true;
         }
-
         if (needs_redraw) {
             km_ui_draw(&ui, &sys_monitor, &proc_monitor);
             needs_redraw = false;
         }
+        km_collector_unlock(&collector);
 
         /* No sleep here: km_ui_get_input() blocks for up to one input tick,
            which paces the loop without adding lag to a keypress. */
     }
 
+    /* Join the collector before freeing anything it might still be using. */
+    km_collector_stop(&collector);
     km_ui_cleanup(&ui);
     km_process_monitor_destroy(&proc_monitor);
     km_system_monitor_destroy(&sys_monitor);

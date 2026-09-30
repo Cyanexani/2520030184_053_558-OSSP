@@ -90,11 +90,7 @@ static bool incoming_reserve(km_process_monitor *m) {
 
 static bool read_process_info(km_process_monitor *m, pid_t pid, km_process_info *info) {
     char buf[KM_PROC_PID_BUF_SIZE];
-    int parsed_pid;
-    int ppid = 0;
-    long priority = 0;
-    long nice = 0;
-    long num_threads = 0;
+    km_proc_stat st;
     int fd_count;
 
     /* Start from a clean slate: any field whose /proc file is unreadable keeps
@@ -106,16 +102,25 @@ static bool read_process_info(km_process_monitor *m, pid_t pid, km_process_info 
         return false;
     }
 
-    if (!km_parse_proc_stat(buf, &parsed_pid, info->name, sizeof(info->name),
-                            &info->state, &ppid, &info->utime, &info->stime,
-                            &priority, &nice, &num_threads)) {
+    if (!km_parse_proc_stat(buf, &st, info->name, sizeof(info->name))) {
         return false;
     }
 
-    info->ppid = (pid_t)ppid;
-    info->priority = (int)priority;
-    info->nice = (int)nice;
-    info->num_threads = num_threads;
+    info->state = st.state;
+    info->ppid = (pid_t)st.ppid;
+    info->utime = st.utime;
+    info->stime = st.stime;
+    info->priority = (int)st.priority;
+    info->nice = (int)st.nice;
+    info->num_threads = st.num_threads;
+
+    info->pgrp = (pid_t)st.pgrp;
+    info->session = (pid_t)st.session;
+    info->tty_nr = st.tty_nr;
+    info->tpgid = (pid_t)st.tpgid;
+
+    info->minflt = st.minflt;
+    info->majflt = st.majflt;
 
     /* Memory, reported in pages. */
     if (km_proc_read_pid_statm(pid, buf, sizeof(buf)) >= 0) {
@@ -192,6 +197,27 @@ static void calculate_cpu_usage(const km_process_monitor *m,
        single-threaded process means this arithmetic is wrong. */
 }
 
+/* [CO-4] Demand paging made visible. A process that touches memory for the
+   first time takes a minor fault per page, so a burst of minor faults is the
+   kernel handing out frames on demand. Major faults mean the page had to be
+   read from disk. The same reuse guard as CPU% applies. */
+static void calculate_fault_rates(km_process_info *current,
+                                  const km_process_info *previous,
+                                  double seconds_elapsed) {
+    current->minflt_rate = 0.0;
+    current->majflt_rate = 0.0;
+
+    if (seconds_elapsed <= 0.0) {
+        return;
+    }
+    if (current->minflt >= previous->minflt) {
+        current->minflt_rate = (double)(current->minflt - previous->minflt) / seconds_elapsed;
+    }
+    if (current->majflt >= previous->majflt) {
+        current->majflt_rate = (double)(current->majflt - previous->majflt) / seconds_elapsed;
+    }
+}
+
 static void push_event(km_process_monitor *m, km_event_type type, pid_t pid,
                        const char *name, const char *description) {
     km_event *slot;
@@ -235,8 +261,9 @@ static void detect_changes(km_process_monitor *m) {
     }
 }
 
-void km_process_monitor_update(km_process_monitor *m) {
+void km_process_monitor_collect(km_process_monitor *m) {
     struct timespec now;
+    struct timespec done;
     double seconds_elapsed = 0.0;
     size_t i;
 
@@ -269,9 +296,14 @@ void km_process_monitor_update(km_process_monitor *m) {
             continue;
         }
 
+        /* [CO-6] Reading m->processes here without the collector's lock is
+           safe only because this thread is the sole writer of it: publish()
+           runs on this same thread, and the UI thread only ever reads. Two
+           readers never race. */
         previous = find_in(m->processes, m->count, pid);
         if (previous) {
             calculate_cpu_usage(m, slot, previous, seconds_elapsed);
+            calculate_fault_rates(slot, previous, seconds_elapsed);
         } else {
             slot->cpu_percent = 0.0;
         }
@@ -279,6 +311,11 @@ void km_process_monitor_update(km_process_monitor *m) {
         m->incoming_count++;
     }
 
+    km_clock_now(&done);
+    m->last_scan_ms = km_clock_diff_seconds(&now, &done) * 1000.0;
+}
+
+void km_process_monitor_publish(km_process_monitor *m) {
     detect_changes(m);
 
     /* Swap rather than copy: the old buffer becomes next tick's scratch. */
@@ -294,6 +331,11 @@ void km_process_monitor_update(km_process_monitor *m) {
         m->incoming_capacity = tmp_capacity;
         m->incoming_count = 0;
     }
+}
+
+void km_process_monitor_update(km_process_monitor *m) {
+    km_process_monitor_collect(m);
+    km_process_monitor_publish(m);
 }
 
 const km_event *km_process_monitor_recent_events(const km_process_monitor *m,
@@ -453,6 +495,32 @@ const char *km_process_state_string(char state) {
         case 'I': return "Idle";
         default:  return "Unknown";
     }
+}
+
+const char *km_format_tty(int tty_nr, char *buf, size_t bufsz) {
+    /* tty_nr packs a device number: major in bits 8-15, minor in bits 0-7
+       and 20-31. Pseudo-terminals, which every terminal window and ssh login
+       uses, are majors 136-143. */
+    unsigned int major = ((unsigned int)tty_nr >> 8) & 0xfffu;
+    unsigned int minor = ((unsigned int)tty_nr & 0xffu) |
+                         (((unsigned int)tty_nr >> 12) & 0xfff00u);
+
+    if (tty_nr == 0) {
+        snprintf(buf, bufsz, "none");
+    } else if (major >= 136 && major <= 143) {
+        snprintf(buf, bufsz, "pts/%u", (major - 136) * 256 + minor);
+    } else if (major == 4 && minor < 64) {
+        snprintf(buf, bufsz, "tty%u", minor);
+    } else if (major == 4) {
+        snprintf(buf, bufsz, "ttyS%u", minor - 64);
+    } else {
+        snprintf(buf, bufsz, "%u:%u", major, minor);
+    }
+    return buf;
+}
+
+bool km_process_is_foreground(const km_process_info *p) {
+    return p->tty_nr != 0 && p->tpgid > 0 && p->pgrp == p->tpgid;
 }
 
 double km_process_memory_percent(const km_process_info *info) {

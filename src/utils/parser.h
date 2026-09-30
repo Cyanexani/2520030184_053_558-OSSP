@@ -53,17 +53,28 @@ typedef struct {
 /* Fields absent from /proc/meminfo are left at zero. */
 void km_parse_meminfo(const char *content, km_meminfo *out);
 
-/* Parse /proc/[pid]/stat. */
-bool km_parse_proc_stat(const char *content,
-                        int *pid,
-                        char *comm, size_t comm_size,
-                        char *state,
-                        int *ppid,
-                        unsigned long long *utime,
-                        unsigned long long *stime,
-                        long *priority,
-                        long *nice,
-                        long *num_threads);
+/* The fields of /proc/[pid]/stat the monitor uses, numbered as in proc(5). */
+typedef struct {
+    int pid;                  /* 1  */
+    char state;               /* 3  */
+    int ppid;                 /* 4  */
+    int pgrp;                 /* 5  process group */
+    int session;              /* 6  session */
+    int tty_nr;               /* 7  controlling terminal, encoded as a dev_t */
+    int tpgid;                /* 8  foreground process group of that terminal */
+    unsigned long minflt;     /* 10 minor page faults */
+    unsigned long majflt;     /* 12 major page faults */
+    unsigned long long utime; /* 14 */
+    unsigned long long stime; /* 15 */
+    long priority;            /* 18 */
+    long nice;                /* 19 */
+    long num_threads;         /* 20 */
+} km_proc_stat;
+
+/* Parse /proc/[pid]/stat. comm is copied out separately because it is the one
+   field whose length is not fixed. */
+bool km_parse_proc_stat(const char *content, km_proc_stat *out,
+                        char *comm, size_t comm_size);
 
 /* Pull the real UID out of /proc/[pid]/status. */
 bool km_parse_status_uid(const char *content, uid_t *out_uid);

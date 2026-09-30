@@ -1,7 +1,7 @@
 /*
  * zombie.c - creates a zombie (defunct) process on purpose.
  *
- * A process becomes a zombie the instant it terminates, and it stays one until
+ * [CO-2] Process termination and a common pitfall. A process becomes a zombie the instant it terminates, and it stays one until
  * its parent collects the exit status with wait(). The kernel cannot free the
  * process table entry before that, because the exit status still has to be
  * delivered to somebody. Everything else is already gone: the address space,

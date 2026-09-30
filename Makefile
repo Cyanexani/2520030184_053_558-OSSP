@@ -5,10 +5,11 @@ CC = gcc
 CFLAGS = -std=gnu11 -Wall -Wextra -O2
 # The monitor additionally needs the GNU/POSIX extensions (sysinfo, DT_DIR,
 # clock_gettime) and the wide-character ncurses API.
-MON_CFLAGS = $(CFLAGS) -D_GNU_SOURCE -D_XOPEN_SOURCE_EXTENDED
+# -pthread because /proc is swept on a second thread; see src/collector/.
+MON_CFLAGS = $(CFLAGS) -pthread -D_GNU_SOURCE -D_XOPEN_SOURCE_EXTENDED
 # ncursesw, not ncurses: the UI prints multibyte characters (the arrow keys in
 # the help bar), which the 8-bit library renders one broken cell per byte.
-LDFLAGS = -lncursesw
+LDFLAGS = -lncursesw -pthread
 
 # Directories
 SRC_DIR = src
@@ -19,7 +20,8 @@ BIN_DIR = bin
 TARGET = $(BIN_DIR)/kernel-monitor
 
 # Standalone teaching programs; see demo/README.md
-DEMO_TARGETS = $(BIN_DIR)/zombie $(BIN_DIR)/orphan $(BIN_DIR)/busy
+DEMO_NAMES = zombie orphan busy pipeline fifo jobctl vmem fileio threadsync
+DEMO_TARGETS = $(addprefix $(BIN_DIR)/,$(DEMO_NAMES))
 
 # Source files
 SOURCES = $(SRC_DIR)/main.c \
@@ -28,6 +30,7 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/system/system_monitor.c \
           $(SRC_DIR)/process/process_monitor.c \
           $(SRC_DIR)/signals/process_control.c \
+          $(SRC_DIR)/collector/collector.c \
           $(SRC_DIR)/ui/ui.c
 
 # Object files
@@ -39,7 +42,8 @@ all: directories $(TARGET) demo
 # Create necessary directories
 directories:
 	@mkdir -p $(BUILD_DIR)/utils $(BUILD_DIR)/proc $(BUILD_DIR)/system \
-	          $(BUILD_DIR)/process $(BUILD_DIR)/signals $(BUILD_DIR)/ui $(BIN_DIR)
+	          $(BUILD_DIR)/process $(BUILD_DIR)/signals $(BUILD_DIR)/collector \
+	          $(BUILD_DIR)/ui $(BIN_DIR)
 
 # Link the executable
 $(TARGET): $(OBJECTS)
@@ -51,11 +55,12 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(MON_CFLAGS) -c $< -o $@
 
-# Demo programs. Plain C, no ncurses, each a single translation unit.
+# Demo programs. Plain C, no ncurses, each a single translation unit. -pthread
+# is only needed by threadsync, and harmless for the rest.
 demo: directories $(DEMO_TARGETS)
 
 $(BIN_DIR)/%: demo/%.c
-	$(CC) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS) -pthread $< -o $@
 	@echo "Built demo: $@"
 
 # Clean build artifacts
@@ -77,14 +82,14 @@ install: all
 	@# cp fails whenever the monitor is already running somewhere.
 	sudo install -m 755 $(TARGET) /usr/local/bin/kernel-monitor
 	sudo ln -sf /usr/local/bin/kernel-monitor /usr/local/bin/kernelmoni
-	sudo install -m 755 $(BIN_DIR)/zombie $(BIN_DIR)/orphan $(BIN_DIR)/busy /usr/local/bin/
+	sudo install -m 755 $(DEMO_TARGETS) /usr/local/bin/
 	@echo "Installed. Run with:  kernelmoni   (or kernel-monitor)"
 
 # Uninstall
 uninstall:
 	@echo "Removing kernel-monitor from /usr/local/bin..."
 	sudo rm -f /usr/local/bin/kernel-monitor /usr/local/bin/kernelmoni
-	sudo rm -f /usr/local/bin/zombie /usr/local/bin/orphan /usr/local/bin/busy
+	sudo rm -f $(addprefix /usr/local/bin/,$(DEMO_NAMES))
 	@echo "Uninstallation complete"
 
 # Debug build
@@ -95,7 +100,7 @@ debug: clean all
 help:
 	@echo "Kernel Monitor - Makefile targets:"
 	@echo "  make          - Build the monitor and the demo programs"
-	@echo "  make demo     - Build only demo/zombie and demo/orphan"
+	@echo "  make demo     - Build only the demo programs in demo/"
 	@echo "  make clean    - Remove build artifacts"
 	@echo "  make run      - Build and run the application"
 	@echo "  make debug    - Build with debug symbols"

@@ -2,6 +2,8 @@
  * busy.c - a process that stays in the Running (R) state and says so, until
  * you stop it.
  *
+ * [CO-2] Process states and scheduling accounting, and [CO-3] signals.
+ *
  * Useful for demonstrating three things in Kernel Monitor at once: a non-zero
  * CPU% column, a process whose STATE reads Running rather than Sleeping, and a
  * live target for the signal keys.

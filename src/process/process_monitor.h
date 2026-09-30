@@ -39,6 +39,24 @@ typedef struct {
     char exe_path[KM_EXE_PATH_MAX];
     int fd_count;
     time_t start_time;
+
+    /* [CO-3] Process groups, sessions and job control. A shell puts every
+       pipeline it launches into one process group, and every group into the
+       login session. The terminal remembers which group is in the foreground
+       (tpgid); only that group receives Ctrl+C and may read the keyboard. */
+    pid_t pgrp;
+    pid_t session;
+    int tty_nr;
+    pid_t tpgid;
+
+    /* [CO-4] Page faults and demand paging. A minor fault is the kernel mapping
+       a page that was already in RAM, or allocating a fresh one on first touch;
+       a major fault had to wait for disk. Both are cumulative counters, so the
+       per-second rates are derived from two samples the same way CPU% is. */
+    unsigned long minflt;
+    unsigned long majflt;
+    double minflt_rate;
+    double majflt_rate;
 } km_process_info;
 
 typedef enum {
@@ -101,11 +119,23 @@ typedef struct {
        one. */
     struct timespec last_sample;
     bool have_last_sample;
+
+    /* How long the last /proc sweep took, shown in the header. */
+    double last_scan_ms;
 } km_process_monitor;
 
 void km_process_monitor_init(km_process_monitor *m);
 void km_process_monitor_destroy(km_process_monitor *m);
 
+/* An update in two halves. collect() does the slow part, a full /proc sweep
+   into a private buffer that nothing else reads. publish() is fast: it records
+   creation and exit events and swaps the new sample in. The split exists so
+   the collector thread can run collect() without holding its lock; see
+   src/collector/collector.c. */
+void km_process_monitor_collect(km_process_monitor *m);
+void km_process_monitor_publish(km_process_monitor *m);
+
+/* collect() then publish(), for use before any second thread exists. */
 void km_process_monitor_update(km_process_monitor *m);
 
 /* Returns NULL when no such process is in the current sample. The pointer is
@@ -124,6 +154,13 @@ const pid_t *km_process_tree_children(const km_process_tree *tree, pid_t pid,
                                       size_t *out_count);
 
 const char *km_process_state_string(char state);
+
+/* Render the tty_nr field as a device name such as "pts/3", or "none". */
+const char *km_format_tty(int tty_nr, char *buf, size_t bufsz);
+
+/* True when the process belongs to the foreground group of its terminal,
+   which is what ps marks with a '+' in its STAT column. */
+bool km_process_is_foreground(const km_process_info *p);
 double km_process_memory_percent(const km_process_info *info);
 
 #endif /* KM_PROCESS_MONITOR_H */

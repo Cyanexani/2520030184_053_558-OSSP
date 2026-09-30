@@ -156,7 +156,7 @@ static bool reserve_sorted(km_ui *ui, size_t needed) {
     return true;
 }
 
-static void draw_system_info(km_ui *ui, const km_system_monitor *sys) {
+static void draw_system_info(km_ui *ui, const km_system_monitor *sys, double scan_ms) {
     char buf[64];
     char uptime[32];
 
@@ -189,6 +189,12 @@ static void draw_system_info(km_ui *ui, const km_system_monitor *sys) {
               truncate_to(buf, sizeof(buf), sys->kernel_version, 20),
               uptime,
               sys->cpu_count);
+
+    /* The time the collector thread spent on its last /proc sweep. The UI
+       thread never waits for it, so this is shown for interest, not as lag. */
+    if (ui->term_width >= 90) {
+        wprintw(ui->system_win, "     Scan: %.1f ms", scan_ms);
+    }
 }
 
 /* CPU descending, ties broken by PID. The tie-break is what keeps the table
@@ -302,6 +308,39 @@ static void draw_process_list(km_ui *ui, const km_process_monitor *proc) {
     }
 }
 
+/* Job control and paging fields for the detail view. Returns the next free
+   row, so the caller can stack it under the other fields on a narrow
+   terminal or place it beside them on a wide one. */
+static int draw_group_and_faults(km_ui *ui, const km_process_info *p, int row, int col) {
+    char tty[16];
+
+    km_format_tty(p->tty_nr, tty, sizeof(tty));
+
+    mvwprintw(ui->content_win, row++, col, "Process Group: %d", (int)p->pgrp);
+    mvwprintw(ui->content_win, row++, col, "Session: %d", (int)p->session);
+    mvwprintw(ui->content_win, row++, col, "Terminal: %s", tty);
+
+    if (p->tty_nr == 0) {
+        mvwprintw(ui->content_win, row++, col, "Foreground: no terminal");
+    } else if (km_process_is_foreground(p)) {
+        mvwprintw(ui->content_win, row++, col, "Foreground: yes");
+    } else if (p->tpgid > 0) {
+        mvwprintw(ui->content_win, row++, col, "Foreground: no, group %d has it",
+                  (int)p->tpgid);
+    } else {
+        mvwprintw(ui->content_win, row++, col, "Foreground: no");
+    }
+
+    row++;
+
+    mvwprintw(ui->content_win, row++, col, "Minor Faults: %lu (%.0f/s)",
+              p->minflt, p->minflt_rate);
+    mvwprintw(ui->content_win, row++, col, "Major Faults: %lu (%.0f/s)",
+              p->majflt, p->majflt_rate);
+
+    return row;
+}
+
 static void draw_process_detail(km_ui *ui, const km_process_monitor *proc) {
     pid_t selected_pid;
     const km_process_info *p;
@@ -358,6 +397,14 @@ static void draw_process_detail(km_ui *ui, const km_process_monitor *proc) {
     mvwprintw(ui->content_win, row++, 2, "File Descriptors: %d", p->fd_count);
 
     row++;
+
+    /* Beside the other fields when there is room, under them when not. */
+    if (ui->term_width >= 92) {
+        draw_group_and_faults(ui, p, 2, 44);
+    } else {
+        row = draw_group_and_faults(ui, p, row, 2);
+        row++;
+    }
 
     mvwprintw(ui->content_win, row++, 2, "Command Line:");
 
@@ -593,7 +640,7 @@ void km_ui_draw(km_ui *ui, const km_system_monitor *sys, const km_process_monito
         wnoutrefresh(stdscr);
     }
 
-    draw_system_info(ui, sys);
+    draw_system_info(ui, sys, proc->last_scan_ms);
 
     switch (ui->view_mode) {
         case KM_VIEW_PROCESS_LIST:

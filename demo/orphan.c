@@ -1,7 +1,7 @@
 /*
  * orphan.c - creates an orphan process on purpose.
  *
- * An orphan is a process whose parent died while it was still running. It is
+ * [CO-2] Parent and child relationships. An orphan is a process whose parent died while it was still running. It is
  * not an error and nothing is leaked: the kernel re-parents it immediately so
  * that somebody is still responsible for reaping it when it eventually exits.
  * That new parent is pid 1 (init, or systemd), or the nearest ancestor that

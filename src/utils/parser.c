@@ -132,16 +132,8 @@ void km_parse_meminfo(const char *content, km_meminfo *out) {
     }
 }
 
-bool km_parse_proc_stat(const char *content,
-                        int *pid,
-                        char *comm, size_t comm_size,
-                        char *state,
-                        int *ppid,
-                        unsigned long long *utime,
-                        unsigned long long *stime,
-                        long *priority,
-                        long *nice,
-                        long *num_threads) {
+bool km_parse_proc_stat(const char *content, km_proc_stat *out,
+                        char *comm, size_t comm_size) {
     const char *open_paren;
     const char *close_paren;
     size_t comm_len;
@@ -156,8 +148,10 @@ bool km_parse_proc_stat(const char *content,
         return false;
     }
 
-    if (sscanf(content, "%d", pid) != 1) {
-        *pid = 0;
+    memset(out, 0, sizeof(*out));
+
+    if (sscanf(content, "%d", &out->pid) != 1) {
+        out->pid = 0;
     }
 
     comm_len = (size_t)(close_paren - open_paren - 1);
@@ -168,16 +162,22 @@ bool km_parse_proc_stat(const char *content,
     comm[comm_len] = '\0';
 
     /* Everything after the closing parenthesis is plain whitespace-separated
-       fields, numbered from 3. Fields 5-13 and 16-17 are skipped with %*s,
-       which steps over a token whatever its sign or width. */
+       fields, numbered from 3. Skipped fields use %*s, which steps over a
+       token whatever its sign or width. */
     return sscanf(close_paren + 1,
-                  " %c %d"                      /* 3 state, 4 ppid            */
-                  " %*s %*s %*s %*s %*s"        /* 5-9                        */
-                  " %*s %*s %*s %*s"            /* 10-13                      */
-                  " %llu %llu"                  /* 14 utime, 15 stime         */
-                  " %*s %*s"                    /* 16 cutime, 17 cstime       */
-                  " %ld %ld %ld",               /* 18 prio, 19 nice, 20 thrds */
-                  state, ppid, utime, stime, priority, nice, num_threads) == 7;
+                  " %c %d"              /* 3 state, 4 ppid                     */
+                  " %d %d %d %d"        /* 5 pgrp, 6 session, 7 tty, 8 tpgid   */
+                  " %*s"                /* 9 flags                             */
+                  " %lu %*s %lu %*s"    /* 10 minflt, 11 cminflt, 12 majflt,
+                                           13 cmajflt                          */
+                  " %llu %llu"          /* 14 utime, 15 stime                  */
+                  " %*s %*s"            /* 16 cutime, 17 cstime                */
+                  " %ld %ld %ld",       /* 18 prio, 19 nice, 20 threads        */
+                  &out->state, &out->ppid,
+                  &out->pgrp, &out->session, &out->tty_nr, &out->tpgid,
+                  &out->minflt, &out->majflt,
+                  &out->utime, &out->stime,
+                  &out->priority, &out->nice, &out->num_threads) == 13;
 }
 
 bool km_parse_status_uid(const char *content, uid_t *out_uid) {
